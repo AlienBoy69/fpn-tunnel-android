@@ -16,6 +16,7 @@ import org.json.JSONObject;
 import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileInputStream;
+import java.io.FileWriter;
 import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.io.InputStreamReader;
@@ -99,9 +100,11 @@ public class AppUpdate {
             act.runOnUiThread(() -> {
                 if (act.isFinishing()) return;
                 if (fTag == null || fTag.isEmpty()) {
+                    ulog(act, "check: no result (offline?) manual=" + manual);
                     if (manual) toast(act, "Couldn't check for updates");
                     return;
                 }
+                ulog(act, "check: latest=" + fTag + " current=" + currentVersion(act));
                 if (fUrl != null && compare(fTag, currentVersion(act)) > 0) {
                     showDialog(act, fName, fUrl, fSize);
                 } else if (manual) {
@@ -121,14 +124,35 @@ public class AppUpdate {
                 .show();
     }
 
+    /** Append a line to the app's service log so update events show up in
+     *  diagnostics bundles. */
+    static void ulog(android.content.Context ctx, String msg) {
+        try {
+            java.text.SimpleDateFormat f =
+                    new java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.US);
+            FileWriter w = new FileWriter(new File(ctx.getFilesDir(), "fpn_log.txt"), true);
+            w.write(f.format(new java.util.Date()) + " update: " + msg + "\n");
+            w.close();
+        } catch (Exception ignored) {}
+    }
+
     private static void download(final Activity act, final String url, final long size) {
-        if (!act.getPackageManager().canRequestPackageInstalls()) {
+        boolean can = act.getPackageManager().canRequestPackageInstalls();
+        ulog(act, "download tapped; canRequestPackageInstalls=" + can);
+        // The permission prompt is advisory and shown at most once: on some
+        // OEM builds canRequestPackageInstalls() keeps reporting false even
+        // after the user allowed the source, which used to dead-end the flow.
+        // After the one advisory, proceed and let PackageInstaller decide.
+        android.content.SharedPreferences prefs =
+                act.getSharedPreferences("fpn_update", android.content.Context.MODE_PRIVATE);
+        if (!can && !prefs.getBoolean("permAsked", false)) {
             new AlertDialog.Builder(act)
                     .setTitle("One-time permission needed")
                     .setMessage("Android asks you to allow FPN Tunnel to install its own "
                             + "updates. Turn on \"Allow from this source\" on the next "
                             + "screen, come back, and tap \"Check for updates\" again.")
                     .setPositiveButton("Open settings", (d, w) -> {
+                        prefs.edit().putBoolean("permAsked", true).apply();
                         try {
                             act.startActivity(new Intent(
                                     Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
@@ -181,8 +205,13 @@ public class AppUpdate {
             act.runOnUiThread(() -> {
                 pd.dismiss();
                 if (act.isFinishing()) return;
-                if (fErr != null) toast(act, "Download failed — try again later");
-                else install(act, out);
+                if (fErr != null) {
+                    ulog(act, "download failed: " + fErr);
+                    toast(act, "Download failed — try again later");
+                } else {
+                    ulog(act, "download ok (" + out.length() + " B); installing");
+                    install(act, out);
+                }
             });
         }).start();
     }
@@ -207,7 +236,9 @@ public class AppUpdate {
                     PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_MUTABLE);
             session.commit(pending.getIntentSender());
             session.close();
+            ulog(act, "install session committed");
         } catch (Exception e) {
+            ulog(act, "install failed: " + e.getMessage());
             toast(act, "Install failed: " + e.getMessage());
         }
     }

@@ -11,6 +11,8 @@ public class UpdateReceiver extends BroadcastReceiver {
     @Override
     public void onReceive(Context ctx, Intent intent) {
         int status = intent.getIntExtra(PackageInstaller.EXTRA_STATUS, -99);
+        AppUpdate.ulog(ctx, "installer status=" + status + " "
+                + intent.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE));
         if (status == PackageInstaller.STATUS_PENDING_USER_ACTION) {
             Intent confirm = intent.getParcelableExtra(Intent.EXTRA_INTENT);
             if (confirm != null) {

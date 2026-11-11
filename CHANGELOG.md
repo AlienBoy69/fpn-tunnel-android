@@ -4,6 +4,18 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [4.1.1]
+
+### Fixed
+- In-app update could dead-end on the one-time "Install unknown apps"
+  permission prompt on some devices (notably Samsung), where the system
+  keeps reporting the permission as missing even after it was granted.
+  The prompt is now advisory and shown at most once; afterwards the
+  update proceeds and Android's installer makes the final call
+- Update events (check result, permission state, download and installer
+  status) are now written to the app log, so they appear in diagnostics
+  bundles and failures are diagnosable
+
 ## [4.1.0]
 
 ### In-app updates
