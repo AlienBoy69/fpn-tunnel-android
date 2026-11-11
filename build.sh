@@ -31,7 +31,7 @@ cp "$HEV/jni/arm64-v8a/libhev-socks5-tunnel.so" build/native/lib/arm64-v8a/
 "$BT/aapt2" compile --dir app/res -o build/res.zip
 "$BT/aapt2" link -o build/out/app-unsigned.apk -I "$AJ" \
   --manifest app/AndroidManifest.xml -R build/res.zip \
-  --version-code 7 --version-name 1.6 \
+  --version-code 1 --version-name 1.0 \
   --java build/gen --auto-add-overlay
 # 2) compile (app + hev classes.jar as lib + generated R)
 find app/src -name '*.java' > build/sources.txt
