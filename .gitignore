@@ -1,0 +1,16 @@
+# Your Firefox session — NEVER commit this. It is a live credential.
+signedInUser.json
+
+# Local signing keys (build.sh generates them on first run)
+keys/
+*.keystore
+keystore_password.txt
+
+# Runtime state
+country.txt
+*.log
+.launching
+.last_refresh
+
+# Build output
+build/
