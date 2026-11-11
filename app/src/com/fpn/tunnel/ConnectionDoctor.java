@@ -303,6 +303,11 @@ public final class ConnectionDoctor {
 
     private static String classifyStartError(Exception e) {
         String m = String.valueOf(e.getMessage());
+        // A locally malformed stored credential (e.g. a session token
+        // that fails hex parsing) is a sign-in problem, not a network
+        // one — the remedy is signing in again, so say E2, not E3.
+        if (e instanceof NumberFormatException || m.contains("For input string"))
+            return "E2";
         if (m.contains("no session token") || m.contains("errno 110")
                 || m.contains("sign-in has ended")) return "E2";
         if (m.contains("FxA refused") || m.contains("proxy pass: HTTP 401")
