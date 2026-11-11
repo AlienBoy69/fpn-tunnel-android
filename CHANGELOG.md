@@ -4,6 +4,30 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [3.1.0] - 2026-11-11
+
+### Added
+
+- **Fastest-server selection:** on start and on every country change the
+  engine probes all of the country's MASQUE servers in parallel (TCP
+  connect time) and uses the fastest — previously the pick was random.
+- **⚡ Auto mode:** a new "Auto (fastest)" location that probes the
+  Iran-nearby set (DE/NL/AT/FR/BE/IT/DK/ES/GB/SE) and exits via the
+  globally fastest server; the status API reports the effective country.
+- **TLS connection pool:** up to 3 pre-handshaked upstream sockets are
+  kept warm, so a new flow pays only the CONNECT round-trip.
+- **Failure re-pick:** if dials keep failing, the engine re-probes and
+  switches upstream (at most once per 30 s).
+- Status API and UI show the active server and its measured RTT.
+
+## [3.0.0] - 2026-11-11
+
+### Added
+
+- New UI: dark card layout, big round connect button (orange →
+  green when connected), live status polling, exit IP + country shown
+  through the tunnel itself, flag-prefixed country list, pass countdown.
+
 ## [2.0.0] - 2026-11-11
 
 ### Added

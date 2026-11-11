@@ -79,8 +79,14 @@ public class FpnEngine {
 
     private static final class Upstream {
         final String hostname; final int port; final String name;
+        long rttMs = -1;
         Upstream(String h, int p, String n) { hostname = h; port = p; name = n; }
     }
+
+    private volatile String effectiveCountry;
+    private volatile long lastRepickMs;
+    private final java.util.concurrent.BlockingQueue<SSLSocket> tlsPool =
+            new java.util.concurrent.LinkedBlockingQueue<>();
 
     // ── caches ──────────────────────────────────────────────────────────────
     private String tokenCache; private long tokenExpiresMs;
@@ -100,7 +106,7 @@ public class FpnEngine {
                 : (SSLSocketFactory) SSLSocketFactory.getDefault();
         try {
             String c = readFile(countryFile).trim().toUpperCase();
-            if (c.matches("[A-Z]{2}")) country = c;
+            if (c.matches("[A-Z]{2}") || c.equals("AUTO")) country = c;
         } catch (Exception ignored) {}
     }
 
@@ -115,7 +121,9 @@ public class FpnEngine {
         running = true;
         new Thread(this::acceptLoop, "fpn-proxy").start();
         new Thread(this::ctrlLoop, "fpn-ctrl").start();
-        log("proxy on 127.0.0.1:" + PORT + " -> " + up.hostname + ":" + up.port + " (" + country + ")");
+        log("proxy on 127.0.0.1:" + PORT + " -> " + up.hostname + ":" + up.port + " (" + country + ")"
+                + " rtt=" + up.rttMs + "ms");
+        startPoolWarmer();
     }
 
     public synchronized void stop() {
@@ -299,11 +307,134 @@ public class FpnEngine {
         return out;
     }
 
+    /**
+     * Pick the FASTEST reachable server, measured by TCP connect time.
+     * For a specific country: probe all of its servers in parallel.
+     * For "AUTO": probe the Iran-nearby set (DE/NL/AT/FR/BE/IT/DK/ES/GB/SE)
+     * and take the global best — the returned server's country becomes
+     * the effective exit country.
+     */
     private Upstream pickUpstreamFor(String code) throws Exception {
-        for (Country c : loadServerList()) {
-            if (c.code.equals(code)) return c.servers.get(random.nextInt(c.servers.size()));
+        List<Country> all = loadServerList();
+        if ("AUTO".equals(code)) {
+            String[] near = {"DE", "NL", "AT", "FR", "BE", "IT", "DK", "ES", "GB", "SE"};
+            List<Upstream> cands = new ArrayList<>();
+            java.util.Map<Upstream, String> owner = new java.util.HashMap<>();
+            for (String cc : near) {
+                for (Country c : all) {
+                    if (!c.code.equals(cc)) continue;
+                    for (Upstream u : c.servers) { cands.add(u); owner.put(u, cc); }
+                }
+            }
+            if (cands.isEmpty()) throw new Exception("no usable server for AUTO");
+            Upstream best = probeBest(cands);
+            effectiveCountry = owner.get(best);
+            return best;
+        }
+        for (Country c : all) {
+            if (c.code.equals(code)) {
+                effectiveCountry = code;
+                return probeBest(c.servers);
+            }
         }
         throw new Exception("no usable server in " + code);
+    }
+
+    private Upstream probeBest(List<Upstream> servers) {
+        if (servers.size() == 1) {
+            Upstream u = servers.get(0);
+            u.rttMs = probeRtt(u);
+            return u;
+        }
+        final java.util.Map<Upstream, Long> results = new java.util.concurrent.ConcurrentHashMap<>();
+        List<Thread> ts = new ArrayList<>();
+        for (final Upstream u : servers) {
+            Thread t = new Thread(() -> {
+                long r = probeRtt(u);
+                if (r >= 0) results.put(u, r);
+            });
+            t.setDaemon(true);
+            t.start();
+            ts.add(t);
+        }
+        for (Thread t : ts) {
+            try { t.join(3500); } catch (InterruptedException ignored) { }
+        }
+        Upstream best = null;
+        long bestR = Long.MAX_VALUE;
+        for (java.util.Map.Entry<Upstream, Long> e : results.entrySet()) {
+            if (e.getValue() < bestR) { bestR = e.getValue(); best = e.getKey(); }
+        }
+        if (best == null) {
+            best = servers.get(random.nextInt(servers.size()));
+            best.rttMs = -1;
+            return best;
+        }
+        best.rttMs = bestR;
+        log("probe: best " + best.hostname + " rtt=" + bestR + "ms of "
+                + results.size() + "/" + servers.size() + " candidates");
+        return best;
+    }
+
+    private long probeRtt(Upstream u) {
+        long t0 = System.currentTimeMillis();
+        try {
+            InetAddress ip = resolvePublic(u.hostname);
+            Socket s = new Socket();
+            s.connect(new java.net.InetSocketAddress(ip, u.port), 2500);
+            long r = System.currentTimeMillis() - t0;
+            try { s.close(); } catch (Exception ignored) { }
+            return r;
+        } catch (Exception e) {
+            return -1;
+        }
+    }
+
+    /** Keep a few TLS-handshaked sockets to the current upstream ready, so
+     *  a new flow pays only the CONNECT round-trip, not TCP+TLS setup. */
+    private void startPoolWarmer() {
+        final Upstream up = upstream;
+        if (up == null) return;
+        new Thread(() -> {
+            while (running && upstream == up) {
+                try {
+                    if (tlsPool.size() < 3) {
+                        SSLSocket s = handshakeTls(up);
+                        if (s != null) tlsPool.offer(s);
+                        else Thread.sleep(1200);
+                    } else {
+                        Thread.sleep(400);
+                    }
+                } catch (Exception e) {
+                    try { Thread.sleep(1200); } catch (InterruptedException ignored) { }
+                }
+            }
+        }, "fpn-pool").start();
+    }
+
+    private void drainPool() {
+        SSLSocket s;
+        while ((s = tlsPool.poll()) != null) {
+            try { s.close(); } catch (Exception ignored) { }
+        }
+    }
+
+    /** If dials keep failing, re-probe and switch upstream (≤ once / 30 s). */
+    private void maybeRepick() {
+        long now = System.currentTimeMillis();
+        if (now - lastRepickMs < 30000) return;
+        lastRepickMs = now;
+        new Thread(() -> {
+            try {
+                Upstream best = pickUpstreamFor(country);
+                if (best != null && upstream != null && !best.hostname.equals(upstream.hostname)) {
+                    upstream = best;
+                    drainPool();
+                    startPoolWarmer();
+                    log("repick: upstream -> " + best.hostname + " rtt=" + best.rttMs + "ms");
+                }
+            } catch (Exception ignored) { }
+        }, "fpn-repick").start();
     }
 
     private synchronized JSONObject setCountry(String code) throws Exception {
@@ -311,13 +442,18 @@ public class FpnEngine {
         Upstream up = pickUpstreamFor(code); // throws on an unknown country
         country = code;
         upstream = up;
+        drainPool();
+        startPoolWarmer();
         try {
             java.io.FileWriter w = new java.io.FileWriter(countryFile);
             w.write(code + "\n"); w.close();
         } catch (Exception ignored) {}
-        log("country -> " + code + " (" + up.name + ") via " + up.hostname + ":" + up.port);
+        log("country -> " + code + " (" + up.name + ") via " + up.hostname + ":" + up.port
+                + " rtt=" + up.rttMs + "ms");
         return new JSONObject().put("country", code).put("name", up.name)
-                .put("upstream", up.hostname + ":" + up.port);
+                .put("effectiveCountry", effectiveCountry)
+                .put("upstream", up.hostname + ":" + up.port)
+                .put("rttMs", up.rttMs);
     }
 
     // ── Proxy core ──────────────────────────────────────────────────────────
@@ -608,9 +744,8 @@ public class FpnEngine {
         return true;
     }
 
-    private UpConn openUpstream(String passToken, String host, int port) throws Exception {
-        Upstream up = upstream;
-        if (up == null) throw new IOException("no upstream picked");
+    /** TCP + TLS to the upstream, fully handshaked and hostname-verified. */
+    private SSLSocket handshakeTls(Upstream up) throws Exception {
         InetAddress upIp = resolvePublic(up.hostname);
         SSLSocket s = (SSLSocket) upstreamFactory.createSocket();
         try {
@@ -628,7 +763,28 @@ public class FpnEngine {
             if (!javax.net.ssl.HttpsURLConnection.getDefaultHostnameVerifier()
                     .verify(up.hostname, s.getSession()))
                 throw new IOException("upstream hostname mismatch: " + up.hostname);
-            s.setSoTimeout(UPSTREAM_TIMEOUT_MS);
+            return s;
+        } catch (Exception e) {
+            try { s.close(); } catch (Exception ignored) { }
+            throw e;
+        }
+    }
+
+    private UpConn openUpstream(String passToken, String host, int port) throws Exception {
+        Upstream up = upstream;
+        if (up == null) throw new IOException("no upstream picked");
+        SSLSocket s = tlsPool.poll();
+        if (s != null && (s.isClosed() || !s.isConnected())) s = null;
+        if (s == null) {
+            s = handshakeTls(up);
+        } else {
+            try { s.setSoTimeout(UPSTREAM_TIMEOUT_MS); }
+            catch (Exception e) {
+                try { s.close(); } catch (Exception ignored) { }
+                s = handshakeTls(up);
+            }
+        }
+        try {
             String hh = host.contains(":") ? "[" + host + "]" : host;
             OutputStream out = s.getOutputStream();
             out.write(("CONNECT " + hh + ":" + port + " HTTP/1.1\r\nHost: " + hh + ":" + port
@@ -672,6 +828,7 @@ public class FpnEngine {
                 if (attempt < 3) Thread.sleep(250L * attempt);
             }
         }
+        maybeRepick();
         throw lastErr;
     }
 
@@ -729,8 +886,11 @@ public class FpnEngine {
             try {
                 if (u.getPath().equals("/status")) {
                     obj = new JSONObject()
-                            .put("country", country)
+                            .put("country", effectiveCountry != null ? effectiveCountry : country)
+                            .put("requestedCountry", country)
                             .put("upstream", upstream != null ? upstream.hostname + ":" + upstream.port : null)
+                            .put("server", upstream != null ? upstream.hostname : null)
+                            .put("rttMs", upstream != null ? upstream.rttMs : -1)
                             .put("passExpiresInSec", passCache != null
                                     ? Math.max(0, passExpiresSec - System.currentTimeMillis() / 1000) : JSONObject.NULL);
                 } else if (u.getPath().equals("/country")) {
