@@ -133,6 +133,8 @@ public class FpnEngine {
         proxyServer = null; ctrlServer = null;
     }
 
+    public boolean isRunning() { return running; }
+
     private void acceptLoop() {
         while (running) {
             try {

@@ -12,8 +12,7 @@ country.txt
 .launching
 .last_refresh
 
-# Downloaded at build time by build.sh (Mozilla root bundle)
-app/assets/cacert.pem
+# app/assets/cacert.pem is vendored in the repo (Mozilla root bundle)
 
 # Build output
 build/

@@ -23,8 +23,9 @@ import java.util.regex.Pattern;
  * Sign in with Firefox — Mozilla's own sign-in page, opened the way
  * Firefox opens it for its VPN (context=oauth_webchannel_v1). The page
  * talks to "the browser" in WebChannel messages; the injected script
- * plays Firefox's side of that channel, exactly as foxhole-vpn's mobile
- * app does, and the page hands the signed-in session to the app.
+ * plays Firefox's side of that channel (the WebChannel protocol
+ * Mozilla's own mobile clients use), and the page hands the signed-in
+ * session to the app.
  *
  * The password is typed into Mozilla's real page inside the WebView —
  * the app never sees it. What the app receives is the session token,
@@ -38,12 +39,12 @@ public class SignInActivity extends Activity {
     private static final Pattern SIGN_IN_HOSTS = Pattern.compile(
             "^https://([\\w-]+\\.)*(firefox\\.com|mozilla\\.org|mozilla\\.com|google\\.com|gstatic\\.com|apple\\.com)(/|$)");
 
-    /** The bridge shim + Firefox's side of the WebChannel (from foxhole-vpn, MIT). */
+    /** The bridge shim + Firefox's side of the WebChannel. */
     private static final String INJECT =
             "(() => {\n"
             + "  window.ReactNativeWebView = { postMessage: function(s) { FpnBridge.postMessage(s); } };\n"
-            + "  if (location.hostname !== \"accounts.firefox.com\" || window.foxholeChannel) return;\n"
-            + "  window.foxholeChannel = true;\n"
+            + "  if (location.hostname !== \"accounts.firefox.com\" || window.fpnChannel) return;\n"
+            + "  window.fpnChannel = true;\n"
             + "  const post = (m) => window.ReactNativeWebView.postMessage(JSON.stringify(m));\n"
             + "  const reply = (command, messageId, data) =>\n"
             + "    window.dispatchEvent(new CustomEvent(\"WebChannelMessageToContent\", { detail: { id: \"account_updates\", message: { command, messageId, data } } }));\n"
@@ -99,7 +100,7 @@ public class SignInActivity extends Activity {
                 + "&state=" + random43()
                 + "&code_challenge=" + random43()
                 + "&code_challenge_method=S256&access_type=offline&response_type=code"
-                + "&action=email&entrypoint=foxhole";
+                + "&action=email&entrypoint=fpntunnel";
     }
 
     @Override

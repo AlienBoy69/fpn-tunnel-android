@@ -51,6 +51,10 @@ public class MainActivity extends Activity {
     private volatile String exitIp = null;
     private volatile String exitLoc = null;
     private boolean polling = false;
+    private Button diagBtn;
+    private volatile long connectStartMs = 0;
+    private volatile boolean connectFailed = false;
+    private volatile long connectedSince = 0;
 
     private static final String[][] COUNTRIES = {
         {"Germany", "DE"}, {"United States", "US"}, {"United Kingdom", "GB"},
@@ -95,6 +99,8 @@ public class MainActivity extends Activity {
         connectBtn = findViewById(R.id.connectBtn);
         acctBtn = findViewById(R.id.acctBtn);
         glow = findViewById(R.id.glowView);
+        diagBtn = findViewById(R.id.diagBtn);
+        diagBtn.setOnClickListener(v -> shareDiagnostics());
 
         acctBtn.setOnClickListener(v -> {
             Intent si = new Intent(this, SignInActivity.class);
@@ -107,6 +113,8 @@ public class MainActivity extends Activity {
             if (connected || connecting) {
                 startService(new Intent(this, FpnVpnService.class).setAction("stop"));
                 connecting = false;
+                connectedSince = 0;
+                connectFailed = false;
                 setStateUi(false, false, null, -1);
                 return;
             }
@@ -198,12 +206,26 @@ public class MainActivity extends Activity {
                 srvRtt = st.optLong("rttMs", -1);
                 boolean was = connected;
                 connected = true; connecting = false; connCountry = cc;
+                if (connectedSince == 0) connectedSince = System.currentTimeMillis();
                 ui.post(() -> setStateUi(true, false, cc, pass));
                 if (!was || exitIp == null) fetchExitInfo();
             } else {
                 boolean was = connected;
                 connected = false; connCountry = null; exitIp = null; exitLoc = null;
-                if (was || !connecting) ui.post(() -> setStateUi(false, false, null, -1));
+                connectedSince = 0;
+                if (connecting && connectStartMs > 0
+                        && System.currentTimeMillis() - connectStartMs > 30000 && !connectFailed) {
+                    connectFailed = true;
+                    connecting = false;
+                    ui.post(() -> {
+                        setStateUi(false, false, null, -1);
+                        statusText.setText("Connection failed");
+                        diagBtn.setText("⚠  Send diagnostics — help improve FPN Tunnel");
+                        diagBtn.setTextColor(Color.parseColor("#FFB020"));
+                    });
+                } else if (was || !connecting) {
+                    ui.post(() -> setStateUi(false, false, null, -1));
+                }
             }
         }).start();
     }
@@ -237,6 +259,11 @@ public class MainActivity extends Activity {
             if (srvRtt >= 0) sb.append(" · ").append(srvRtt).append(" ms");
             if (passSec >= 0) sb.append("  ·  pass ").append(passSec / 60)
                     .append(":").append(String.format("%02d", passSec % 60));
+            if (connectedSince > 0) {
+                long s = (System.currentTimeMillis() - connectedSince) / 1000;
+                sb.append("  ·  up ").append(s / 60).append(":")
+                        .append(String.format("%02d", s % 60));
+            }
             exitInfo.setText(sb.toString());
         } else {
             statusDot.setTextColor(Color.parseColor("#64748B"));
@@ -285,6 +312,23 @@ public class MainActivity extends Activity {
         return sb.toString();
     }
 
+    /**
+     * Compose a sanitized diagnostics bundle (Diagnostics) and offer it
+     * through the system share sheet. Nothing is ever sent automatically —
+     * the user picks where it goes (GitHub issue, email, messenger…).
+     */
+    private void shareDiagnostics() {
+        String state = "State: " + (connected ? "connected"
+                : connectFailed ? "CONNECT FAILED" : "disconnected")
+                + " · requested=" + reqCountry + " effective=" + connCountry
+                + " · server=" + srvName + " · rttMs=" + srvRtt;
+        Intent send = new Intent(Intent.ACTION_SEND);
+        send.setType("text/plain");
+        send.putExtra(Intent.EXTRA_SUBJECT, "FPN Tunnel diagnostics");
+        send.putExtra(Intent.EXTRA_TEXT, Diagnostics.build(this, state));
+        startActivity(Intent.createChooser(send, "Send diagnostics"));
+    }
+
     /** Best-effort: tell the engine which country to exit from. Returns its reply or null. */
     private String pushCountry(String code) {
         try {
@@ -311,6 +355,10 @@ public class MainActivity extends Activity {
     private void startTunnel() {
         final String code = getSharedPreferences("fpn", MODE_PRIVATE).getString("country", "DE");
         connecting = true;
+        connectStartMs = System.currentTimeMillis();
+        connectFailed = false;
+        diagBtn.setText("Send diagnostics");
+        diagBtn.setTextColor(Color.parseColor("#8FA3CC"));
         setStateUi(false, true, null, -1);
         new Thread(() -> {
             pushCountry(code); // best effort; the engine also remembers its last country

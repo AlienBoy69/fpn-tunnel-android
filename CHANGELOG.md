@@ -4,6 +4,33 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [4.0.0] - 2026-11-12
+
+### Added
+
+- **Shareable diagnostics:** a "Send diagnostics" button composes a
+  sanitized bundle (app/Android/device info, connection state, tails of
+  the service and engine logs) with emails, JWTs, session tokens and
+  long hex strings redacted, and offers it through the system share
+  sheet. If a connect attempt fails (30 s without a tunnel), the
+  button lights up and asks for the report. Nothing is ever sent
+  automatically — a VPN app must not phone home.
+- **Self-healing tunnel:** a watchdog in the VPN service checks the
+  engine and the TUN every 25 s and rebuilds whichever half died
+  (in-place engine swap under a live TUN, full rebuild otherwise),
+  giving up after 6 restarts.
+- Session uptime ("up M:SS") on the status card.
+
+### Changed
+
+- The client now stands fully on its own: the sign-in WebChannel shim
+  and FxA entrypoint carry the app's own names, the Mozilla root bundle
+  is vendored in the repo (no build-time download), and the docs
+  describe the engine as what it is — an independent implementation
+  (protocol behaviour informed by the MIT-licensed foxhole project,
+  credited in the README).
+- Notification text no longer hardcodes an exit country.
+
 ## [3.2.0] - 2026-11-11
 
 ### Changed

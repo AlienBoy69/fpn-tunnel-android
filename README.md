@@ -50,8 +50,8 @@ subscription and a phone Mozilla forgot, it is for you.
 
 ## Features
 
-- 📦 **One APK, nothing else** — the proxy engine is a Java port of the
-  audited foxhole core and runs inside the app itself
+- 📦 **One APK, nothing else** — the proxy engine is an original Java
+  implementation that runs inside the app itself
 - 🔑 **Sign-in in the app** — Mozilla's own login page in a WebView
   (WebChannel flow, the same method Mozilla's mobile clients use); the
   session never leaves the device and the login is one-time
@@ -62,6 +62,13 @@ subscription and a phone Mozilla forgot, it is for you.
   off the tunnel (edit the `SKIP` list in `FpnVpnService.java`)
 - 🔄 **Self-maintaining engine** — 10-minute proxy passes refetch
   automatically
+- ♻️ **Self-healing tunnel** — a watchdog restarts a dead engine or
+  tunnel in place (bounded retries), and the status card shows live
+  session uptime
+- 📤 **Shareable diagnostics** — if a connection fails, one tap composes
+  a sanitized log bundle (emails, tokens and session material are
+  redacted) that you send through any app you choose; the app itself
+  never sends anything anywhere
 - 🛡️ **Hardened upstream path** — MASQUE hosts are resolved over
   DNS-over-HTTPS (the system resolver proved unreliable for them) and the
   upstream TLS chain is validated against the system store with a PKIX
@@ -143,10 +150,11 @@ supported path for most users.
 
 ## Credits
 
-The engine is a port of the open-source
-[foxhole](https://github.com/DierCodes/foxhole) core logic (MIT) to
-Java, with the tunnel provided by
-[hev-socks5-tunnel](https://github.com/heiher/hev-socks5-tunnel).
+FPN Tunnel is an independent implementation, written for this
+project. The FPN/MASQUE protocol behaviour was informed by the
+open-source [foxhole](https://github.com/DierCodes/foxhole) project
+(MIT), and the TUN forwarder is
+[hev-socks5-tunnel](https://github.com/heiher/hev-socks5-tunnel) (MIT).
 
 ## License
 

@@ -24,8 +24,9 @@ import hev.htproxy.TProxyService;
  * Whole-phone tunnel for the FPN Tunnel client: Android's
  * VPN slot, filled by hev-socks5-tunnel forwarding everything to the local
  * FPN proxy (127.0.0.1:11080), served by the in-app FpnEngine in this same
- * process. Same architecture as Foxhole's own Android app (its
- * FoxholeService.kt), minus the app around it.
+ * process. A watchdog keeps it honest: if the engine or the tunnel
+ * dies while the user wants it up, the dead half is rebuilt (bounded
+ * retries) instead of the connection silently dropping.
  */
 public class FpnVpnService extends VpnService {
     private static final String TAG = "fpntunnel";
@@ -40,6 +41,9 @@ public class FpnVpnService extends VpnService {
 
     private ParcelFileDescriptor tun;
     private FpnEngine engine;
+    private volatile boolean watchdogOn;
+    private volatile boolean rebuilding;
+    private int restarts;
 
     /** Append a line to files/fpn_log.txt so failures are visible without logcat. */
     private void flog(String s) {
@@ -78,7 +82,7 @@ public class FpnVpnService extends VpnService {
         return new Notification.Builder(this, CHANNEL)
                 .setSmallIcon(R.drawable.ic)
                 .setContentTitle("FPN Tunnel")
-                .setContentText("Connected — Germany (Mozilla); Muse & Sina stay direct")
+                .setContentText("Connected — routed via Mozilla MASQUE")
                 .setOngoing(true)
                 .setShowWhen(false)
                 .setContentIntent(open)
@@ -132,6 +136,7 @@ public class FpnVpnService extends VpnService {
             }
             tun = fd;
             flog("tunnel up, running=" + TProxyService.TProxyIsRunning());
+            startWatchdog();
         } catch (Throwable e) {
             flog("tunnel FAILED: " + e);
             stopForeground(true);
@@ -140,6 +145,7 @@ public class FpnVpnService extends VpnService {
     }
 
     private synchronized void tunnelOff() {
+        watchdogOn = false;
         if (engine != null) {
             try { engine.stop(); } catch (Exception ignored) {}
             engine = null;
@@ -164,6 +170,60 @@ public class FpnVpnService extends VpnService {
     public void onDestroy() {
         tunnelOff();
         super.onDestroy();
+    }
+
+    /**
+     * Every 25 s: if the tunnel process or the engine died while the
+     * user wants the VPN up, rebuild the dead half. Engine-only deaths
+     * are swapped in place under the live TUN; a dead TUN triggers a
+     * full tunnelOn. Gives up after 6 restarts so a hopeless network
+     * cannot drain the battery.
+     */
+    private void startWatchdog() {
+        if (watchdogOn) return;
+        watchdogOn = true;
+        new Thread(() -> {
+            while (watchdogOn) {
+                try { Thread.sleep(25000); } catch (InterruptedException e) { return; }
+                if (!watchdogOn || tun == null) continue;
+                boolean tunOk = false;
+                try { tunOk = TProxyService.TProxyIsRunning(); } catch (Exception ignored) {}
+                boolean engOk = engine != null && engine.isRunning();
+                if (tunOk && engOk) { restarts = 0; continue; }
+                if (restarts >= 6) {
+                    flog("watchdog: giving up after " + restarts + " restarts");
+                    watchdogOn = false;
+                    stopForeground(true);
+                    stopSelf();
+                    return;
+                }
+                restarts++;
+                flog("watchdog: tunOk=" + tunOk + " engOk=" + engOk + " — restart #" + restarts);
+                if (tunOk && !engOk) {
+                    try {
+                        FpnEngine old = engine;
+                        if (old != null) try { old.stop(); } catch (Exception ignored) {}
+                        engine = new FpnEngine(new File(getFilesDir(), "session.json"),
+                                new File(getFilesDir(), "country.txt"),
+                                new File(getFilesDir(), "engine_log.txt"),
+                                FpnEngine.buildUpstreamFactory(this,
+                                        new File(getFilesDir(), "engine_log.txt")));
+                        engine.start();
+                        flog("watchdog: engine restarted");
+                    } catch (Throwable e) {
+                        flog("watchdog: engine restart failed: " + e);
+                    }
+                } else if (!rebuilding) {
+                    rebuilding = true;
+                    new Thread(() -> {
+                        try { Thread.sleep(3000); } catch (InterruptedException ignored) {}
+                        tunnelOn();
+                        rebuilding = false;
+                    }).start();
+                    return; // the fresh tunnelOn starts a fresh watchdog
+                }
+            }
+        }, "fpn-watchdog").start();
     }
 
     private static String tunnelConfig() {
