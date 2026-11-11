@@ -1,0 +1,12 @@
+# FPN Tunnel — automatic error reporting config (Fix P).
+#
+# Copy this file to reporting.properties (same directory) and fill in
+# the report-inbox bot credentials. build.sh bakes it into the APK's
+# assets when present. reporting.properties is GITIGNORED — never
+# commit a real token.
+#
+# When the file is absent (every public build), error reporting is
+# compiled in but DISABLED: no reports are composed for sending and
+# nothing ever leaves the device.
+BOT_TOKEN=
+CHAT_ID=

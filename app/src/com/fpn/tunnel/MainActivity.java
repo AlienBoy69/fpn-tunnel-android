@@ -40,7 +40,7 @@ import java.util.List;
 public class MainActivity extends Activity {
     private TextView statusDot, statusText, exitInfo;
     private Button connectBtn, acctBtn;
-    private android.view.View glow;
+    private OrbView orb;
     private final Handler ui = new Handler(Looper.getMainLooper());
     private volatile boolean connected = false;
     private volatile boolean connecting = false;
@@ -53,9 +53,18 @@ public class MainActivity extends Activity {
     private boolean polling = false;
     private Button diagBtn;
     private Button updateBtn;
+    private Button doctorBtn, howBtn, bioBtn, rootBtn, errBtn;
+    private TextView usageInfo, faHint, reportNotice;
     private volatile long connectStartMs = 0;
     private volatile boolean connectFailed = false;
     private volatile long connectedSince = 0;
+    // Fix L: live usage sampling for the ~2 s smoothed rate.
+    private volatile long sessUp = -1, sessDown = -1;
+    private long lastSampleUp = -1, lastSampleDown = -1, lastSampleMs = 0;
+    private double smoothedRate = 0;
+    // Fix G: doctor report dialog bookkeeping.
+    private volatile boolean doctorShown = false;
+    private volatile boolean doctorWaiting = false;
 
     private static final String[][] COUNTRIES = {
         {"Germany", "DE"}, {"United States", "US"}, {"United Kingdom", "GB"},
@@ -83,6 +92,10 @@ public class MainActivity extends Activity {
     }
 
     private void refreshAccount() {
+        if (BiometricLock.isSealed(this)) {
+            acctBtn.setText("🔒  Session locked — tap Connect to unlock");
+            return;
+        }
         String email = FpnSession.email(this);
         acctBtn.setText(email != null ? ("👤  " + email + "  ·  tap to switch")
                                       : "Sign in with Firefox");
@@ -99,15 +112,61 @@ public class MainActivity extends Activity {
         exitInfo = findViewById(R.id.exitInfo);
         connectBtn = findViewById(R.id.connectBtn);
         acctBtn = findViewById(R.id.acctBtn);
-        glow = findViewById(R.id.glowView);
+        orb = findViewById(R.id.orbView);
         diagBtn = findViewById(R.id.diagBtn);
         diagBtn.setOnClickListener(v -> shareDiagnostics());
+        doctorBtn = findViewById(R.id.doctorBtn);
+        doctorBtn.setOnClickListener(v -> runDoctor());
+        howBtn = findViewById(R.id.howBtn);
+        howBtn.setOnClickListener(v ->
+                startActivity(new Intent(this, HowItWorksActivity.class)));
+        bioBtn = findViewById(R.id.bioBtn);
+        // BiometricPrompt exists only on API 28+; below that the lock
+        // feature is cleanly absent (the button stays hidden).
+        if (android.os.Build.VERSION.SDK_INT >= 28) {
+            bioBtn.setVisibility(View.VISIBLE);
+            bioBtn.setText(BiometricLock.stateLabel(this));
+            bioBtn.setOnClickListener(v -> toggleBiometricLock());
+        }
+        rootBtn = findViewById(R.id.rootBtn);
+        // Fix N: the Root mode entry appears only when a root path
+        // plausibly exists (silent pre-check — no su is executed and
+        // no Magisk prompt can appear until the user opens the panel).
+        if (RootMode.maybeRoot()) {
+            rootBtn.setVisibility(View.VISIBLE);
+            rootBtn.setOnClickListener(v -> openRootPanel());
+        }
+        usageInfo = findViewById(R.id.usageInfo);
+        faHint = findViewById(R.id.faHint);
+        reportNotice = findViewById(R.id.reportNotice);
+        errBtn = findViewById(R.id.errBtn);
+        // Fix P: disclosure — the toggle is labeled on the main screen
+        // and a one-line notice shows on first run.
+        errBtn.setText("Anonymous error reports: "
+                + (ErrorReporter.isEnabled(this) ? "ON" : "OFF"));
+        errBtn.setOnClickListener(v -> {
+            boolean on = !ErrorReporter.isEnabled(this);
+            ErrorReporter.setEnabled(this, on);
+            errBtn.setText("Anonymous error reports: " + (on ? "ON" : "OFF"));
+            if (on) ErrorReporter.flushAsync(this);
+        });
+        if (!getSharedPreferences("fpn", MODE_PRIVATE).contains("errReports")) {
+            reportNotice.setVisibility(View.VISIBLE);
+            getSharedPreferences("fpn", MODE_PRIVATE).edit()
+                    .putBoolean("errReports", true).apply();
+        }
         updateBtn = findViewById(R.id.updateBtn);
         updateBtn.setText("Check for updates · v" + AppUpdate.currentVersion(this));
         updateBtn.setOnClickListener(v -> AppUpdate.check(this, true));
         AppUpdate.check(this, false);
 
+        // Cold start with a sealed session: if both the sealed and the
+        // plain session exist (crash mid-toggle), keep only the sealed
+        // one — the plain copy must not linger unprotected.
+        BiometricLock.reseal(this);
+
         acctBtn.setOnClickListener(v -> {
+            if (BiometricLock.isSealed(this)) { unlockThen(() -> refreshAccount()); return; }
             Intent si = new Intent(this, SignInActivity.class);
             si.putExtra("switch_account", FpnSession.exists(this));
             startActivityForResult(si, 2);
@@ -123,17 +182,30 @@ public class MainActivity extends Activity {
                 setStateUi(false, false, null, -1);
                 return;
             }
-            if (!FpnSession.exists(this)) {
-                statusText.setText("Sign in with Firefox first");
-                return;
-            }
-            Intent prep = VpnService.prepare(this);
-            if (prep != null) startActivityForResult(prep, 1);
-            else startTunnel();
+            attemptConnect();
         });
 
         final SharedPreferences prefs = getSharedPreferences("fpn", MODE_PRIVATE);
-        final String saved = prefs.getString("country", "DE");
+        final String saved = prefs.getString("country", "AUTO");
+
+        // Fix I: one-line Persian hint for fa-IR users, first run only.
+        if ("fa".equals(java.util.Locale.getDefault().getLanguage())
+                && !prefs.getBoolean("faHintSeen", false)) {
+            faHint.setText("💡 برای اتصال راحت‌تر، حالت «خودکار ⚡» را انتخاب کنید؛ برنامه خودش سالم‌ترین سرور را پیدا می‌کند.");
+            faHint.setVisibility(View.VISIBLE);
+            prefs.edit().putBoolean("faHintSeen", true).apply();
+        }
+
+        // Fix B: cold start — no session goes straight to sign-in; a
+        // session the user left connected reconnects with no tap.
+        if (savedInstanceState == null) {
+            if (!FpnSession.exists(this) && !BiometricLock.isSealed(this)) {
+                Intent si = new Intent(this, SignInActivity.class);
+                startActivityForResult(si, 2);
+            } else if (prefs.getBoolean("wasConnected", false)) {
+                ui.postDelayed(this::attemptConnect, 800);
+            }
+        }
         Spinner spin = findViewById(R.id.countrySpinner);
         List<String> names = new ArrayList<>();
         final List<String> codes = new ArrayList<>();
@@ -176,17 +248,210 @@ public class MainActivity extends Activity {
         });
     }
 
+    /** Connect path shared by the button and Fix B auto-connect. */
+    private void attemptConnect() {
+        if (connected || connecting) return;
+        if (BiometricLock.isSealed(this)) {
+            unlockThen(this::attemptConnect);
+            return;
+        }
+        if (!FpnSession.exists(this)) {
+            statusText.setText("Sign in with Firefox first");
+            Intent si = new Intent(this, SignInActivity.class);
+            startActivityForResult(si, 2);
+            return;
+        }
+        Intent prep = VpnService.prepare(this);
+        if (prep != null) startActivityForResult(prep, 1);
+        else startTunnel();
+    }
+
+    /** Run r after the biometric prompt unseals the session. */
+    private void unlockThen(final Runnable r) {
+        BiometricLock.unlock(this, new BiometricLock.Callback() {
+            @Override public void onSuccess() { refreshAccount(); r.run(); }
+            @Override public void onError(String m) { statusText.setText(m); }
+        });
+    }
+
+    private void toggleBiometricLock() {
+        if (BiometricLock.isEnabled(this)) {
+            BiometricLock.disable(this, new BiometricLock.Callback() {
+                @Override public void onSuccess() {
+                    bioBtn.setText(BiometricLock.stateLabel(MainActivity.this));
+                    refreshAccount();
+                }
+                @Override public void onError(String m) { statusText.setText(m); }
+            });
+        } else if (FpnSession.exists(this)) {
+            BiometricLock.enable(this, new BiometricLock.Callback() {
+                @Override public void onSuccess() {
+                    bioBtn.setText(BiometricLock.stateLabel(MainActivity.this));
+                    refreshAccount();
+                }
+                @Override public void onError(String m) { statusText.setText(m); }
+            });
+        } else {
+            statusText.setText("Sign in first, then enable the biometric lock");
+        }
+    }
+
+    // ── Fix N: Root mode panel ──────────────────────────────────────────
+    private void openRootPanel() {
+        if (RootMode.hasRootCached(this)) {
+            showRootPanel();
+            return;
+        }
+        statusText.setText("Checking for root (Magisk may ask)…");
+        RootMode.probeAsync(this, root -> ui.post(() -> {
+            if (root) showRootPanel();
+            else statusText.setText("Root not available for this app");
+        }));
+    }
+
+    private android.widget.Switch rootSwitch(String label, boolean on) {
+        android.widget.Switch s = new android.widget.Switch(this);
+        s.setText(label);
+        s.setTextColor(Color.parseColor("#E6EDF3"));
+        s.setTextSize(14);
+        s.setPadding(0, 14, 0, 14);
+        s.setChecked(on);
+        return s;
+    }
+
+    private void showRootPanel() {
+        android.widget.LinearLayout box = new android.widget.LinearLayout(this);
+        box.setOrientation(android.widget.LinearLayout.VERTICAL);
+        int pad = (int) (18 * getResources().getDisplayMetrics().density);
+        box.setPadding(pad, pad / 2, pad, 0);
+
+        final android.widget.Switch swUpdate = rootSwitch(
+                "Silent self-update (root)", RootMode.opt(this, "root_update"));
+        swUpdate.setOnCheckedChangeListener((v, on) ->
+                RootMode.setOpt(this, "root_update", on));
+        box.addView(swUpdate);
+
+        final android.widget.Switch swBatt = rootSwitch(
+                "Protect from battery optimization (root)",
+                RootMode.opt(this, "root_battery"));
+        swBatt.setOnCheckedChangeListener((v, on) -> {
+            swBatt.setEnabled(false);
+            RootMode.setBatteryWhitelist(this, on, ok -> ui.post(() -> {
+                swBatt.setEnabled(true);
+                swBatt.setChecked(RootMode.opt(this, "root_battery"));
+                if (!ok) statusText.setText("Battery whitelist change failed");
+            }));
+        });
+        box.addView(swBatt);
+
+        final android.widget.Switch swLeak = rootSwitch(
+                "Doctor leak test (root)", RootMode.opt(this, "root_leak"));
+        swLeak.setOnCheckedChangeListener((v, on) ->
+                RootMode.setOpt(this, "root_leak", on));
+        box.addView(swLeak);
+
+        final android.widget.Switch swKill = rootSwitch(
+                "Kernel kill switch — coming soon (not shipped: an app-owned "
+                        + "firewall chain could outlive the app and block all traffic)",
+                false);
+        swKill.setEnabled(false);
+        box.addView(swKill);
+
+        new android.app.AlertDialog.Builder(this)
+                .setTitle("Root mode")
+                .setView(box)
+                .setPositiveButton("Done", null)
+                .show();
+    }
+
+    // ── Fix G: ConnectionDoctor UI ──────────────────────────────────────
+    private File doctorReportFile() {
+        return new File(getFilesDir(), ConnectionDoctor.REPORT_FILE);
+    }
+
+    private void runDoctor() {
+        final long before = doctorReportFile().exists()
+                ? doctorReportFile().lastModified() : 0;
+        try {
+            startService(new Intent(this, FpnVpnService.class).setAction("diagnose"));
+        } catch (Exception e) {
+            try {
+                Intent svc = new Intent(this, FpnVpnService.class).setAction("diagnose");
+                if (android.os.Build.VERSION.SDK_INT >= 26) startForegroundService(svc);
+                else startService(svc);
+            } catch (Exception e2) {
+                statusText.setText("Diagnosis could not start: " + e2.getMessage());
+                return;
+            }
+        }
+        statusText.setText("Diagnosing the connection…");
+        waitForDoctorReport(before);
+    }
+
+    /** Poll for a fresh doctor report (≤ ~90 s), then show it. */
+    private void waitForDoctorReport(final long beforeMs) {
+        if (doctorWaiting) return;
+        doctorWaiting = true;
+        new Thread(() -> {
+            for (int i = 0; i < 45; i++) {
+                try { Thread.sleep(2000); } catch (InterruptedException e) { break; }
+                File f = doctorReportFile();
+                if (f.exists() && f.lastModified() > beforeMs) {
+                    doctorWaiting = false;
+                    ui.post(() -> showDoctorReport());
+                    return;
+                }
+            }
+            doctorWaiting = false;
+            ui.post(() -> statusText.setText("Diagnosis is taking long — check again shortly"));
+        }).start();
+    }
+
+    private void showDoctorReport() {
+        if (doctorShown) return;
+        File f = doctorReportFile();
+        if (!f.exists()) return;
+        String text;
+        try {
+            java.io.FileInputStream in = new java.io.FileInputStream(f);
+            byte[] buf = new byte[in.available()];
+            int n = in.read(buf);
+            in.close();
+            text = n > 0 ? new String(buf, 0, n, "UTF-8") : "";
+        } catch (Exception e) {
+            return;
+        }
+        getSharedPreferences("fpn", MODE_PRIVATE).edit()
+                .putLong("doctorSeenMtime", f.lastModified()).apply();
+        doctorShown = true;
+        new android.app.AlertDialog.Builder(this)
+                .setTitle("Connection diagnosis")
+                .setMessage(text)
+                .setPositiveButton("OK", (d, w) -> doctorShown = false)
+                .setOnDismissListener(d -> doctorShown = false)
+                .show();
+    }
+
     @Override
     protected void onResume() {
         super.onResume();
         if (acctBtn != null) refreshAccount();
+        if (orb != null) orb.startAnim(); // Fix O: animate only while visible
         polling = true;
         ui.post(pollTask);
+        // A doctor run that finished while the user was away still
+        // gets its report shown, once.
+        File f = doctorReportFile();
+        long seen = getSharedPreferences("fpn", MODE_PRIVATE)
+                .getLong("doctorSeenMtime", 0);
+        if (f.exists() && f.lastModified() > seen && !doctorShown)
+            ui.postDelayed(this::showDoctorReport, 600);
     }
 
     @Override
     protected void onPause() {
         super.onPause();
+        if (orb != null) orb.stopAnim();
         polling = false;
         ui.removeCallbacks(pollTask);
     }
@@ -196,9 +461,39 @@ public class MainActivity extends Activity {
         public void run() {
             if (!polling) return;
             pollOnce();
-            ui.postDelayed(this, 3000);
+            // 1 s cadence: the usage readout (Fix L) updates live.
+            ui.postDelayed(this, 1000);
         }
     };
+
+    /**
+     * Fix L readout: live session ↓/↑ + smoothed rate while connected,
+     * persisted today / all-time totals underneath, and the plan line.
+     * All numbers are this device's own traffic — Mozilla exposes no
+     * usage meter for FPN and the plan is Unlimited.
+     */
+    private void updateUsageUi() {
+        SharedPreferences p = getSharedPreferences("fpn", MODE_PRIVATE);
+        String today = FpnVpnService.todayKey();
+        long tUp = today.equals(p.getString("usageDate", "")) ? p.getLong("usageTodayUp", 0) : 0;
+        long tDown = today.equals(p.getString("usageDate", "")) ? p.getLong("usageTodayDown", 0) : 0;
+        long totUp = p.getLong("usageTotalUp", 0);
+        long totDown = p.getLong("usageTotalDown", 0);
+        StringBuilder sb = new StringBuilder("Plan: Unlimited");
+        if (connected && sessUp >= 0) {
+            sb.append("  ·  ↓ ").append(FpnVpnService.fmtBytes(sessDown))
+              .append(" · ↑ ").append(FpnVpnService.fmtBytes(sessUp)).append(" this session");
+            if (smoothedRate > 0)
+                sb.append(" · ").append(FpnVpnService.fmtBytes((long) smoothedRate)).append("/s");
+            sb.append("\n");
+        } else {
+            sb.append("  ·  ");
+        }
+        sb.append("Today: ").append(FpnVpnService.fmtBytes(tDown + tUp))
+          .append("  ·  All time: ").append(FpnVpnService.fmtBytes(totDown + totUp))
+          .append("  (this device)");
+        usageInfo.setText(sb.toString());
+    }
 
     private void pollOnce() {
         new Thread(() -> {
@@ -209,27 +504,51 @@ public class MainActivity extends Activity {
                 reqCountry = st.optString("requestedCountry", cc);
                 srvName = st.optString("server", null);
                 srvRtt = st.optLong("rttMs", -1);
+                sessUp = st.optLong("bytesUp", -1);
+                sessDown = st.optLong("bytesDown", -1);
+                long now = System.currentTimeMillis();
+                if (sessUp >= 0 && lastSampleMs > 0 && now > lastSampleMs) {
+                    double instant = (double) ((sessUp - lastSampleUp)
+                            + (sessDown - lastSampleDown)) * 1000.0 / (now - lastSampleMs);
+                    if (instant >= 0)
+                        smoothedRate = smoothedRate == 0 ? instant
+                                : 0.5 * smoothedRate + 0.5 * instant;
+                }
+                if (sessUp >= 0) {
+                    lastSampleUp = sessUp; lastSampleDown = sessDown; lastSampleMs = now;
+                }
                 boolean was = connected;
                 connected = true; connecting = false; connCountry = cc;
+                connectFailed = false;
                 if (connectedSince == 0) connectedSince = System.currentTimeMillis();
-                ui.post(() -> setStateUi(true, false, cc, pass));
+                ui.post(() -> { setStateUi(true, false, cc, pass); updateUsageUi(); });
                 if (!was || exitIp == null) fetchExitInfo();
             } else {
                 boolean was = connected;
                 connected = false; connCountry = null; exitIp = null; exitLoc = null;
                 connectedSince = 0;
+                sessUp = -1; sessDown = -1; lastSampleMs = 0; smoothedRate = 0;
                 if (connecting && connectStartMs > 0
-                        && System.currentTimeMillis() - connectStartMs > 30000 && !connectFailed) {
+                        && System.currentTimeMillis() - connectStartMs > 15000 && !connectFailed) {
                     connectFailed = true;
                     connecting = false;
+                    // Fix G: ~15 s without a tunnel — automatic diagnosis.
+                    final long before = doctorReportFile().exists()
+                            ? doctorReportFile().lastModified() : 0;
                     ui.post(() -> {
                         setStateUi(false, false, null, -1);
-                        statusText.setText("Connection failed");
+                        statusText.setText("Connection failed — diagnosing…");
                         diagBtn.setText("⚠  Send diagnostics — help improve FPN Tunnel");
                         diagBtn.setTextColor(Color.parseColor("#FFB020"));
+                        try {
+                            startService(new Intent(MainActivity.this, FpnVpnService.class)
+                                    .setAction("diagnose"));
+                        } catch (Exception ignored) {}
+                        waitForDoctorReport(before);
+                        updateUsageUi();
                     });
                 } else if (was || !connecting) {
-                    ui.post(() -> setStateUi(false, false, null, -1));
+                    ui.post(() -> { setStateUi(false, false, null, -1); updateUsageUi(); });
                 }
             }
         }).start();
@@ -240,8 +559,7 @@ public class MainActivity extends Activity {
             statusDot.setTextColor(Color.parseColor("#FFB020"));
             statusText.setText("Connecting…");
             connectBtn.setText("Cancel");
-            if (glow != null) glow.setBackgroundResource(R.drawable.glow_off);
-            connectBtn.setBackgroundResource(R.drawable.circle_off);
+            if (orb != null) orb.setState(OrbView.STATE_CONNECTING);
             exitInfo.setText("Exit: —");
             return;
         }
@@ -250,8 +568,7 @@ public class MainActivity extends Activity {
             statusText.setText("Connected · " + ("AUTO".equals(reqCountry) ? "⚡ → " : "")
                     + flag(cc) + countryName(cc));
             connectBtn.setText("Disconnect");
-            if (glow != null) glow.setBackgroundResource(R.drawable.glow_on);
-            connectBtn.setBackgroundResource(R.drawable.circle_on);
+            if (orb != null) orb.setState(OrbView.STATE_ON);
             StringBuilder sb = new StringBuilder();
             if (exitIp != null) {
                 sb.append("Exit: ").append(exitIp);
@@ -274,8 +591,7 @@ public class MainActivity extends Activity {
             statusDot.setTextColor(Color.parseColor("#64748B"));
             statusText.setText("Disconnected");
             connectBtn.setText("Connect");
-            if (glow != null) glow.setBackgroundResource(R.drawable.glow_off);
-            connectBtn.setBackgroundResource(R.drawable.circle_off);
+            if (orb != null) orb.setState(OrbView.STATE_OFF);
             exitInfo.setText("Exit: —");
         }
     }
@@ -353,12 +669,14 @@ public class MainActivity extends Activity {
         if (requestCode == 1 && resultCode == RESULT_OK) startTunnel();
         if (requestCode == 2) {
             refreshAccount();
-            if (resultCode == RESULT_OK) statusText.setText("Signed in — tap Connect");
+            // Fix E/H: a completed sign-in connects immediately —
+            // no extra tap between login and the tunnel.
+            if (resultCode == RESULT_OK) attemptConnect();
         }
     }
 
     private void startTunnel() {
-        final String code = getSharedPreferences("fpn", MODE_PRIVATE).getString("country", "DE");
+        final String code = getSharedPreferences("fpn", MODE_PRIVATE).getString("country", "AUTO");
         connecting = true;
         connectStartMs = System.currentTimeMillis();
         connectFailed = false;
@@ -368,7 +686,9 @@ public class MainActivity extends Activity {
         new Thread(() -> {
             pushCountry(code); // best effort; the engine also remembers its last country
             try {
-                startForegroundService(new Intent(this, FpnVpnService.class));
+                Intent svc = new Intent(this, FpnVpnService.class);
+                if (android.os.Build.VERSION.SDK_INT >= 26) startForegroundService(svc);
+                else startService(svc);
             } catch (Exception e) {
                 connecting = false;
                 ui.post(() -> statusText.setText("Start FAILED: " + e));

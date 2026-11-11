@@ -16,3 +16,12 @@ country.txt
 
 # Build output
 build/
+session.json
+session.json.enc
+OVERNIGHT*.md
+OVERNIGHT-REPORT.md
+/*.apk
+doctor_report.txt
+smart1.done
+app/reporting.properties
+app/assets/reporting.properties

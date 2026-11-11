@@ -86,9 +86,15 @@ public class AppUpdate {
                     for (int i = 0; i < assets.length(); i++) {
                         JSONObject a = assets.getJSONObject(i);
                         if (a.optString("name", "").endsWith(".apk")) {
-                            apkUrl = a.optString("browser_download_url", null);
-                            size = a.optLong("size", 0);
-                            break;
+                            String u = a.optString("browser_download_url", null);
+                            // Fix M: only ever download from GitHub's own
+                            // release-asset hosts, over HTTPS — never from
+                            // a URL some other host slipped into a response.
+                            if (u != null && isGithubAssetUrl(u)) {
+                                apkUrl = u;
+                                size = a.optLong("size", 0);
+                                break;
+                            }
                         }
                     }
                 }
@@ -137,7 +143,10 @@ public class AppUpdate {
     }
 
     private static void download(final Activity act, final String url, final long size) {
-        boolean can = act.getPackageManager().canRequestPackageInstalls();
+        // canRequestPackageInstalls is API 26+; before that the
+        // unknown-sources setting governed and PackageInstaller decides.
+        boolean can = android.os.Build.VERSION.SDK_INT < 26
+                || act.getPackageManager().canRequestPackageInstalls();
         ulog(act, "download tapped; canRequestPackageInstalls=" + can);
         // The permission prompt is advisory and shown at most once: on some
         // OEM builds canRequestPackageInstalls() keeps reporting false even
@@ -216,7 +225,102 @@ public class AppUpdate {
         }).start();
     }
 
+    /** True for HTTPS URLs on GitHub's release download hosts. */
+    private static boolean isGithubAssetUrl(String u) {
+        try {
+            URL url = new URL(u);
+            if (!"https".equals(url.getProtocol())) return false;
+            String h = url.getHost();
+            return h.equals("github.com") || h.equals("objects.githubusercontent.com");
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    /**
+     * Fix M — verify a downloaded APK BEFORE it reaches the installer:
+     * it must be this same package and carry a signing certificate
+     * identical to the installed app's. PackageInstaller would refuse
+     * a mismatched update anyway; checking here means a tampered or
+     * wrong file is rejected with a clear message instead of a cryptic
+     * install failure, and nothing unexpected is ever handed to the
+     * system installer.
+     */
+    private static boolean verifyDownloadedApk(Activity act, File apk) {
+        try {
+            android.content.pm.PackageManager pm = act.getPackageManager();
+            android.content.pm.Signature[] a, b;
+            if (android.os.Build.VERSION.SDK_INT >= 28) {
+                android.content.pm.PackageInfo arch = pm.getPackageArchiveInfo(
+                        apk.getAbsolutePath(), android.content.pm.PackageManager.GET_SIGNING_CERTIFICATES);
+                if (arch == null || !act.getPackageName().equals(arch.packageName)) {
+                    ulog(act, "verify: package mismatch — rejected");
+                    return false;
+                }
+                android.content.pm.PackageInfo mine = pm.getPackageInfo(
+                        act.getPackageName(), android.content.pm.PackageManager.GET_SIGNING_CERTIFICATES);
+                a = arch.signingInfo.getApkContentsSigners();
+                b = mine.signingInfo.getApkContentsSigners();
+            } else {
+                // API 25–27: the legacy signatures field carries the same bytes.
+                android.content.pm.PackageInfo arch = pm.getPackageArchiveInfo(
+                        apk.getAbsolutePath(), android.content.pm.PackageManager.GET_SIGNATURES);
+                if (arch == null || !act.getPackageName().equals(arch.packageName)) {
+                    ulog(act, "verify: package mismatch — rejected");
+                    return false;
+                }
+                android.content.pm.PackageInfo mine = pm.getPackageInfo(
+                        act.getPackageName(), android.content.pm.PackageManager.GET_SIGNATURES);
+                a = arch.signatures;
+                b = mine.signatures;
+            }
+            if (a == null || b == null || a.length == 0 || b.length == 0) return false;
+            for (android.content.pm.Signature ca : a)
+                for (android.content.pm.Signature cb : b)
+                    if (java.util.Arrays.equals(ca.toByteArray(), cb.toByteArray())) return true;
+            ulog(act, "verify: signing certificate mismatch — rejected");
+            return false;
+        } catch (Exception e) {
+            ulog(act, "verify: failed (" + e + ") — rejected");
+            return false;
+        }
+    }
+
     private static void install(Activity act, File apk) {
+        if (!verifyDownloadedApk(act, apk)) {
+            toast(act, "Update rejected: the downloaded file is not signed as FPN Tunnel");
+            try { apk.delete(); } catch (Exception ignored) {}
+            return;
+        }
+        ulog(act, "verify: package + signing certificate match — installing");
+        // Fix N: with Root mode's silent update on, install through su
+        // (no system installer prompt). The signature check above has
+        // already run; any root failure falls back to the normal flow.
+        if (RootMode.opt(act, "root_update") && RootMode.hasRootCached(act)) {
+            installViaRoot(act, apk);
+            return;
+        }
+        installViaInstaller(act, apk);
+    }
+
+    private static void installViaRoot(final Activity act, final File apk) {
+        new Thread(() -> {
+            String out = RootMode.execSu(act,
+                    "pm install -r " + apk.getAbsolutePath(), 120_000);
+            boolean ok = out != null && out.contains("Success");
+            ulog(act, "root install -> " + (ok ? "Success" : "failed: " + out));
+            act.runOnUiThread(() -> {
+                if (ok) {
+                    toast(act, "Updated — restarting the app");
+                } else {
+                    toast(act, "Root install failed — using the normal installer");
+                    installViaInstaller(act, apk);
+                }
+            });
+        }, "fpn-rootinstall").start();
+    }
+
+    private static void installViaInstaller(Activity act, File apk) {
         try {
             PackageInstaller pi = act.getPackageManager().getPackageInstaller();
             PackageInstaller.SessionParams params = new PackageInstaller.SessionParams(

@@ -77,18 +77,17 @@
                 android:layout_gravity="center_horizontal"
                 android:layout_marginTop="18dp">
 
-                <View
-                    android:id="@+id/glowView"
+                <com.fpn.tunnel.OrbView
+                    android:id="@+id/orbView"
                     android:layout_width="196dp"
-                    android:layout_height="196dp"
-                    android:background="@drawable/glow_off" />
+                    android:layout_height="196dp" />
 
                 <Button
                     android:id="@+id/connectBtn"
                     android:layout_width="150dp"
                     android:layout_height="150dp"
                     android:layout_gravity="center"
-                    android:background="@drawable/circle_off"
+                    android:background="@null"
                     android:elevation="8dp"
                     android:text="Connect"
                     android:textColor="#FFFFFF"
@@ -105,6 +104,37 @@
                 android:text="Exit: —"
                 android:textColor="#9FB2D8"
                 android:textSize="13sp" />
+
+            <TextView
+                android:id="@+id/usageInfo"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:gravity="center"
+                android:text="Plan: Unlimited"
+                android:textColor="#9FB2D8"
+                android:textSize="12sp" />
+
+            <TextView
+                android:id="@+id/reportNotice"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:gravity="center"
+                android:text="Anonymous error reports are on — you can turn them off below."
+                android:textColor="#8FA3CC"
+                android:textSize="11sp"
+                android:visibility="gone" />
+
+            <TextView
+                android:id="@+id/faHint"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:gravity="center"
+                android:textColor="#FFB020"
+                android:textSize="13sp"
+                android:visibility="gone" />
         </LinearLayout>
 
         <TextView
@@ -138,6 +168,57 @@
             android:textStyle="bold" />
 
         <Button
+            android:id="@+id/doctorBtn"
+            android:layout_width="match_parent"
+            android:layout_height="44dp"
+            android:layout_marginTop="8dp"
+            android:background="@null"
+            android:text="Diagnose connection"
+            android:textColor="#8FA3CC"
+            android:textSize="13sp" />
+
+        <Button
+            android:id="@+id/howBtn"
+            android:layout_width="match_parent"
+            android:layout_height="44dp"
+            android:layout_marginTop="2dp"
+            android:background="@null"
+            android:text="How it works"
+            android:textColor="#8FA3CC"
+            android:textSize="13sp" />
+
+        <Button
+            android:id="@+id/bioBtn"
+            android:layout_width="match_parent"
+            android:layout_height="44dp"
+            android:layout_marginTop="2dp"
+            android:background="@null"
+            android:text="Biometric lock"
+            android:textColor="#8FA3CC"
+            android:textSize="13sp" />
+
+        <Button
+            android:id="@+id/rootBtn"
+            android:layout_width="match_parent"
+            android:layout_height="44dp"
+            android:layout_marginTop="2dp"
+            android:background="@null"
+            android:text="Root mode"
+            android:textColor="#8FA3CC"
+            android:textSize="13sp"
+            android:visibility="gone" />
+
+        <Button
+            android:id="@+id/errBtn"
+            android:layout_width="match_parent"
+            android:layout_height="44dp"
+            android:layout_marginTop="2dp"
+            android:background="@null"
+            android:text="Anonymous error reports: ON"
+            android:textColor="#8FA3CC"
+            android:textSize="13sp" />
+
+        <Button
             android:id="@+id/diagBtn"
             android:layout_width="match_parent"
             android:layout_height="44dp"
@@ -162,7 +243,7 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="14dp"
             android:gravity="center"
-            android:text="v4.0 · Mozilla MASQUE · engine on-device"
+            android:text="v4.2 · Mozilla MASQUE · engine on-device"
             android:textColor="#5F7396"
             android:textSize="11sp" />
     </LinearLayout>

@@ -27,6 +27,13 @@ PW=$(cat keys/keystore_password.txt)
 # Mozilla root bundle for the engine's upstream TLS fallback (gitignored;
 # build-time download, preamble stripped — the app parses it block by block)
 [ -f app/assets/cacert.pem ] || { mkdir -p app/assets && curl -sL -o /tmp/cacert.pem https://curl.se/ca/cacert.pem && sed -n '/-----BEGIN CERTIFICATE-----/,$p' /tmp/cacert.pem > app/assets/cacert.pem; }
+# Fix P: bake the private reporting config into assets when present
+# (gitignored; public builds ship without it and reporting is disabled)
+if [ -f app/reporting.properties ]; then
+  cp app/reporting.properties app/assets/reporting.properties
+else
+  rm -f app/assets/reporting.properties
+fi
 # classes.jar of hev (extract if needed)
 [ -f "$HEV/classes.jar" ] || { curl -sL -o /tmp/hev.aar https://github.com/heiher/hev-socks5-tunnel/releases/download/2.18.0/hev-socks5-tunnel.aar && unzip -o -q /tmp/hev.aar -d "$HEV"; }
 cp "$HEV/jni/arm64-v8a/libhev-socks5-tunnel.so" build/native/lib/arm64-v8a/
@@ -35,7 +42,8 @@ cp "$HEV/jni/armeabi-v7a/libhev-socks5-tunnel.so" build/native/lib/armeabi-v7a/
 "$BT/aapt2" compile --dir app/res -o build/res.zip
 "$BT/aapt2" link -o build/out/app-unsigned.apk -I "$AJ" \
   --manifest app/AndroidManifest.xml -R build/res.zip -A app/assets \
-  --version-code 16 --version-name 4.1.2 \
+  --version-code 17 --version-name 4.2.0 \
+  --min-sdk-version 29 --target-sdk-version 34 \
   --java build/gen --auto-add-overlay
 # 2) compile (app + hev classes.jar as lib + generated R)
 find app/src -name '*.java' > build/sources.txt

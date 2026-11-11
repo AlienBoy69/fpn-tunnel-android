@@ -74,7 +74,7 @@ public class FpnEngine {
     private ServerSocket proxyServer;
     private ServerSocket ctrlServer;
 
-    private volatile String country = "DE";
+    private volatile String country = "AUTO"; // Fix I: new installs default to AUTO
     private volatile Upstream upstream;
 
     private static final class Upstream {
@@ -87,6 +87,50 @@ public class FpnEngine {
     private volatile long lastRepickMs;
     private final java.util.concurrent.BlockingQueue<SSLSocket> tlsPool =
             new java.util.concurrent.LinkedBlockingQueue<>();
+
+    // Fix A: per-host CONNECT health. A gateway that answers MASQUE
+    // CONNECTs with 5xx is "sick" for a while and excluded from server
+    // picks, even though its TCP/TLS probe still looks fast — that
+    // mismatch stranded users on a dead exit in the 2026-11-12 01:14
+    // incident (ca.m1 502-ing every CONNECT for a minute while the
+    // probe-based repick kept re-electing it).
+    private final java.util.Map<String, Long> sickUntilMs =
+            new java.util.concurrent.ConcurrentHashMap<>();
+    // Research constant (iran.md): a 502/503-ing gateway is quarantined
+    // 5–15 min — long enough to ride out a sick-gateway episode like
+    // the 2026-11-12 01:14 one (~1 min of 502s, but such episodes recur
+    // in clusters), short enough to rejoin once it is healthy again.
+    private static final long SICK_MS = 600_000;
+
+    /** Mozilla destination-policy refusals are not gateway sickness. */
+    private static boolean isDestRefusal(String statusLine) {
+        return statusLine != null && (statusLine.contains("Prohibited")
+                || statusLine.contains("Destination"));
+    }
+
+    private void markSick(Upstream up, int code) {
+        if (up == null) return;
+        sickUntilMs.put(up.hostname, System.currentTimeMillis() + SICK_MS);
+        log("upstream sick: " + up.hostname + " (" + code + ")");
+    }
+
+    private boolean isSick(Upstream u) {
+        Long t = sickUntilMs.get(u.hostname);
+        return t != null && System.currentTimeMillis() < t;
+    }
+
+    private void clearSick(Upstream up) {
+        if (up != null) sickUntilMs.remove(up.hostname);
+    }
+
+    /** Drop the cached Guardian pass so the next currentPass() refetches. */
+    public synchronized void forcePassRefresh() {
+        passCache = null;
+        passExpiresSec = 0;
+        tokenCache = null;
+        tokenExpiresMs = 0;
+        log("pass force-refreshed");
+    }
 
     // ── caches ──────────────────────────────────────────────────────────────
     private String tokenCache; private long tokenExpiresMs;
@@ -202,27 +246,53 @@ public class FpnEngine {
                 + "\", hash=\"" + hash + "\", mac=\"" + macB64 + "\"";
     }
 
+    /**
+     * Fix I transport for Mozilla APIs: DoH-resolved raw TLS via FpnNet
+     * first (Iranian DNS poisoning cannot break it, and TLS validation
+     * is the engine's own factory); the classic URLConnection (system
+     * DNS) remains as a fallback if the raw path fails outright.
+     */
+    private FpnNet.Resp httpTransport(String method, URL url, String authHeader,
+                                      byte[] body) throws Exception {
+        java.util.Map<String, String> headers = new java.util.LinkedHashMap<>();
+        if (body != null) headers.put("Content-Type", "application/json");
+        if (authHeader != null) headers.put("Authorization", authHeader);
+        try {
+            return FpnNet.request(upstreamFactory, logFile, method, url.toString(), headers, body);
+        } catch (Exception netErr) {
+            HttpURLConnection c = (HttpURLConnection) url.openConnection();
+            c.setRequestMethod(method);
+            c.setConnectTimeout(15_000); c.setReadTimeout(15_000);
+            c.setRequestProperty("Accept-Language", "en-US"); // Fix K
+            c.setRequestProperty("User-Agent", "FPN-Tunnel/4.2");
+            for (java.util.Map.Entry<String, String> e : headers.entrySet())
+                c.setRequestProperty(e.getKey(), e.getValue());
+            if (body != null) {
+                c.setDoOutput(true);
+                c.getOutputStream().write(body);
+            }
+            FpnNet.Resp r = new FpnNet.Resp();
+            r.status = c.getResponseCode();
+            InputStream in = r.status >= 400 ? c.getErrorStream() : c.getInputStream();
+            r.body = in != null ? readAll(in) : "";
+            return r;
+        }
+    }
+
     private JSONObject fxaPost(String path, JSONObject payload, String sessionToken) throws Exception {
         URL url = new URL(FXA_API + path);
         String body = payload.toString();
         Creds creds = sessionToken != null ? credsFor(sessionToken) : null;
         long ts = System.currentTimeMillis() / 1000;
         for (int attempt = 0; ; attempt++) {
-            HttpURLConnection c = (HttpURLConnection) url.openConnection();
-            c.setRequestMethod("POST");
-            c.setConnectTimeout(15_000); c.setReadTimeout(15_000);
-            c.setRequestProperty("Content-Type", "application/json");
-            if (creds != null) c.setRequestProperty("Authorization", hawkHeader(url, body, creds, ts));
-            c.setDoOutput(true);
-            c.getOutputStream().write(body.getBytes(StandardCharsets.UTF_8));
-            int status = c.getResponseCode();
-            InputStream in = status >= 400 ? c.getErrorStream() : c.getInputStream();
-            JSONObject data = new JSONObject(in != null ? readAll(in) : "{}");
+            String auth = creds != null ? hawkHeader(url, body, creds, ts) : null;
+            FpnNet.Resp r = httpTransport("POST", url, auth, body.getBytes(StandardCharsets.UTF_8));
+            JSONObject data = new JSONObject(r.body == null || r.body.isEmpty() ? "{}" : r.body);
             if (creds != null && data.optInt("errno", -1) == 111 && data.has("serverTime") && attempt == 0) {
                 ts = data.getLong("serverTime");
                 continue;
             }
-            data.put("_status", status);
+            data.put("_status", r.status);
             return data;
         }
     }
@@ -255,13 +325,11 @@ public class FpnEngine {
     private synchronized String currentPass() throws Exception {
         if (passCache != null && System.currentTimeMillis() / 1000 < passExpiresSec - 120) return passCache;
         String accessToken = getAccessToken();
-        HttpURLConnection c = (HttpURLConnection) new URL("https://" + GUARDIAN_HOST + "/api/v1/fpn/token").openConnection();
-        c.setConnectTimeout(10_000); c.setReadTimeout(10_000);
-        c.setRequestProperty("Authorization", "Bearer " + accessToken);
-        c.setRequestProperty("Content-Type", "application/json");
-        int status = c.getResponseCode();
-        if (status != 200) throw new Exception("proxy pass: HTTP " + status);
-        JSONObject data = new JSONObject(readAll(c.getInputStream()));
+        FpnNet.Resp r = httpTransport("GET",
+                new URL("https://" + GUARDIAN_HOST + "/api/v1/fpn/token"),
+                "Bearer " + accessToken, null);
+        if (r.status != 200) throw new Exception("proxy pass: HTTP " + r.status);
+        JSONObject data = new JSONObject(r.body);
         String token = data.optString("token", null);
         if (token == null) throw new Exception("proxy pass response had no token");
         String[] parts = token.split("\\.");
@@ -276,10 +344,9 @@ public class FpnEngine {
     // ── Server list ─────────────────────────────────────────────────────────
     private List<Country> loadServerList() throws Exception {
         if (serverList != null && System.currentTimeMillis() - serverListAtMs < 3600_000) return serverList;
-        HttpURLConnection c = (HttpURLConnection) new URL(SERVERLIST_URL).openConnection();
-        c.setConnectTimeout(15_000); c.setReadTimeout(15_000);
-        if (c.getResponseCode() != 200) throw new Exception("server list: HTTP " + c.getResponseCode());
-        JSONObject body = new JSONObject(readAll(c.getInputStream()));
+        FpnNet.Resp r = httpTransport("GET", new URL(SERVERLIST_URL), null, null);
+        if (r.status != 200) throw new Exception("server list: HTTP " + r.status);
+        JSONObject body = new JSONObject(r.body);
         JSONArray data = body.optJSONArray("data");
         List<Country> out = new ArrayList<>();
         Set<String> seen = new HashSet<>();
@@ -318,23 +385,25 @@ public class FpnEngine {
      */
     private Upstream pickUpstreamFor(String code) throws Exception {
         List<Country> all = loadServerList();
-        if ("AUTO".equals(code)) {
-            String[] near = {"DE", "NL", "AT", "FR", "BE", "IT", "DK", "ES", "GB", "SE"};
-            List<Upstream> cands = new ArrayList<>();
-            java.util.Map<Upstream, String> owner = new java.util.HashMap<>();
-            for (String cc : near) {
-                for (Country c : all) {
-                    if (!c.code.equals(cc)) continue;
-                    for (Upstream u : c.servers) { cands.add(u); owner.put(u, cc); }
-                }
-            }
-            if (cands.isEmpty()) throw new Exception("no usable server for AUTO");
-            Upstream best = probeBest(cands);
-            effectiveCountry = owner.get(best);
-            return best;
-        }
+        if ("AUTO".equals(code)) return pickAuto(all);
         for (Country c : all) {
             if (c.code.equals(code)) {
+                // Fix A: if every server of the chosen country is sick
+                // (CONNECT 5xx), fall back to the AUTO set rather than
+                // hammering a gateway that is erroring.
+                boolean allSick = !c.servers.isEmpty();
+                for (Upstream u : c.servers) if (!isSick(u)) { allSick = false; break; }
+                if (allSick) {
+                    log("failover: all " + code + " servers sick — falling back to AUTO");
+                    try {
+                        Upstream alt = pickAuto(all);
+                        if (alt != null && !isSick(alt)) return alt;
+                    } catch (Exception ignored) { }
+                    // No healthy fallback anywhere: a fresh pass sometimes
+                    // clears gateway state — force one and keep the pick.
+                    forcePassRefresh();
+                    drainPool();
+                }
                 effectiveCountry = code;
                 return probeBest(c.servers);
             }
@@ -342,7 +411,31 @@ public class FpnEngine {
         throw new Exception("no usable server in " + code);
     }
 
+    private Upstream pickAuto(List<Country> all) throws Exception {
+        String[] near = {"DE", "NL", "AT", "FR", "BE", "IT", "DK", "ES", "GB", "SE"};
+        List<Upstream> cands = new ArrayList<>();
+        java.util.Map<Upstream, String> owner = new java.util.HashMap<>();
+        for (String cc : near) {
+            for (Country c : all) {
+                if (!c.code.equals(cc)) continue;
+                for (Upstream u : c.servers) { cands.add(u); owner.put(u, cc); }
+            }
+        }
+        if (cands.isEmpty()) throw new Exception("no usable server for AUTO");
+        Upstream best = probeBest(cands);
+        effectiveCountry = owner.get(best);
+        return best;
+    }
+
     private Upstream probeBest(List<Upstream> servers) {
+        // Fix A: CONNECT-sick servers are not candidates while any
+        // healthy one exists (their TCP probe still answers fast).
+        List<Upstream> healthy = new ArrayList<>();
+        for (Upstream u : servers) if (!isSick(u)) healthy.add(u);
+        if (!healthy.isEmpty() && healthy.size() < servers.size()) {
+            log("probe: skipping " + (servers.size() - healthy.size()) + " sick server(s)");
+            servers = healthy;
+        }
         if (servers.size() == 1) {
             Upstream u = servers.get(0);
             u.rttMs = probeRtt(u);
@@ -426,18 +519,36 @@ public class FpnEngine {
         long now = System.currentTimeMillis();
         if (now - lastRepickMs < 30000) return;
         lastRepickMs = now;
-        new Thread(() -> {
-            try {
-                Upstream best = pickUpstreamFor(country);
-                if (best != null && upstream != null && !best.hostname.equals(upstream.hostname)) {
-                    upstream = best;
-                    drainPool();
-                    startPoolWarmer();
-                    log("repick: upstream -> " + best.hostname + " rtt=" + best.rttMs + "ms");
-                }
-            } catch (Exception ignored) { }
-        }, "fpn-repick").start();
+        new Thread(() -> { repickNow(); }, "fpn-repick").start();
     }
+
+    /**
+     * Synchronous re-pick (Fix A/G): probe again with sick servers
+     * excluded and switch upstream if a different one wins. Returns
+     * true when the upstream changed.
+     */
+    public boolean repickNow() {
+        try {
+            Upstream best = pickUpstreamFor(country);
+            if (best != null && upstream != null && !best.hostname.equals(upstream.hostname)) {
+                Upstream old = upstream;
+                upstream = best;
+                drainPool();
+                startPoolWarmer();
+                if (isSick(old)) log("failover: " + old.hostname + " -> " + best.hostname);
+                log("repick: upstream -> " + best.hostname + " rtt=" + best.rttMs + "ms");
+                return true;
+            }
+        } catch (Exception ignored) { }
+        return false;
+    }
+
+    public String currentUpstreamHost() { return upstream != null ? upstream.hostname : null; }
+    public String requestedCountry() { return country; }
+    public String effectiveCountry() { return effectiveCountry; }
+
+    /** Public wrapper so the service/doctor can switch country live. */
+    public JSONObject changeCountry(String code) throws Exception { return setCountry(code); }
 
     private synchronized JSONObject setCountry(String code) throws Exception {
         code = code.toUpperCase();
@@ -751,7 +862,9 @@ public class FpnEngine {
         InetAddress upIp = resolvePublic(up.hostname);
         SSLSocket s = (SSLSocket) upstreamFactory.createSocket();
         try {
-            s.connect(new java.net.InetSocketAddress(upIp, up.port), UPSTREAM_TIMEOUT_MS);
+            // Fix I: bound the connect phase to ~6 s — on a filtered
+            // network a dead exit must be abandoned fast, not after 15 s.
+            s.connect(new java.net.InetSocketAddress(upIp, up.port), 6000);
             s.setSoTimeout(UPSTREAM_TIMEOUT_MS);
             // SNI for the real hostname + ALPN http/1.1 — the MASQUE
             // frontend expects both; the Node build set them explicitly.
@@ -775,7 +888,12 @@ public class FpnEngine {
     private UpConn openUpstream(String passToken, String host, int port) throws Exception {
         Upstream up = upstream;
         if (up == null) throw new IOException("no upstream picked");
-        SSLSocket s = tlsPool.poll();
+        return openUpstream(up, passToken, host, port, true);
+    }
+
+    private UpConn openUpstream(Upstream up, String passToken, String host, int port,
+                                boolean usePool) throws Exception {
+        SSLSocket s = usePool ? tlsPool.poll() : null;
         if (s != null && (s.isClosed() || !s.isConnected())) s = null;
         if (s == null) {
             s = handshakeTls(up);
@@ -808,7 +926,25 @@ public class FpnEngine {
             String statusLine = head.substring(0, head.indexOf("\r\n")).trim();
             String[] sp = statusLine.split(" ");
             int code = sp.length > 1 ? Integer.parseInt(sp[1]) : 0;
-            if (code != 200) throw new IOException("upstream: " + statusLine);
+            if (code != 200) {
+                // Fix A: a 5xx from the CONNECT marks this gateway sick
+                // in the dial path itself (not gated by any throttle) —
+                // EXCEPT a destination-policy refusal ("502 Destination
+                // IP Prohibited": direct IPs and some ports are refused
+                // by Mozilla for every user). That 502 says nothing
+                // about gateway health; quarantining on it would exile
+                // a healthy gateway (seen live 2026-11-12 01:56, when
+                // mtalk:5228 and direct-IP dials 502'd through the
+                // working CA gateway).
+                if (code >= 500 && code <= 599 && !isDestRefusal(statusLine))
+                    markSick(up, code);
+                // CONNECT-health taxonomy (iran.md): 407 means the pass
+                // itself was rejected — the repair is a fresh pass, not
+                // a server quarantine.
+                if (code == 407) forcePassRefresh();
+                throw new IOException("upstream: " + statusLine);
+            }
+            clearSick(up);
             s.setSoTimeout(0);
             UpConn c = new UpConn();
             c.socket = s; c.in = in; c.out = out;
@@ -826,7 +962,23 @@ public class FpnEngine {
             try { return openUpstream(passToken, host, port); }
             catch (Exception e) {
                 lastErr = e;
+                // 407: the pass was rejected and forcePassRefresh() has
+                // already run inside openUpstream — refetch and retry
+                // with the fresh pass instead of giving up.
+                if (e.getMessage() != null && e.getMessage().contains("HTTP/1.1 407")) {
+                    try { passToken = currentPass(); } catch (Exception ignored) { }
+                    if (attempt < 3) { Thread.sleep(250L * attempt); continue; }
+                    break;
+                }
                 if (e.getMessage() != null && e.getMessage().matches(".*HTTP/1\\.1 4.*")) break;
+                // A destination refusal will fail identically on every
+                // retry and every server — stop at once, no repick churn.
+                if (e.getMessage() != null && isDestRefusal(e.getMessage())) break;
+                // Fix A: on a gateway 5xx, give the (throttled) repick a
+                // chance to move us before burning the remaining retries
+                // on the same sick host.
+                if (e.getMessage() != null && e.getMessage().contains("upstream: HTTP/1.1 5"))
+                    maybeRepick();
                 if (attempt < 3) Thread.sleep(250L * attempt);
             }
         }
@@ -834,20 +986,189 @@ public class FpnEngine {
         throw lastErr;
     }
 
+    // ── Fix I/G: real CONNECT health checks ──────────────────────────────────
+    /** Outcome of one real MASQUE CONNECT health dial. */
+    public static final class Health {
+        public boolean ok;
+        public String code = "E7";   // Doctor reason code when !ok
+        public String detail = "";
+        public String host;
+    }
+
+    private Health classifyDialError(Exception e) {
+        Health h = new Health();
+        String m = String.valueOf(e.getMessage());
+        h.detail = m;
+        if (isDestRefusal(m)) h.code = "E7"; // policy refusal, not a health signal
+        else if (m.contains("upstream: HTTP/1.1 5") || m.contains("proxy pass: HTTP 5")) h.code = "E4";
+        else if (m.contains("upstream: HTTP/1.1 407")) h.code = "E5";
+        else if (m.contains("no session token") || m.contains("errno 110")
+                || m.contains("sign-in has ended")) h.code = "E2";
+        else if (m.contains("proxy pass: HTTP 401") || m.contains("proxy pass: HTTP 403")
+                || m.contains("FxA refused")) h.code = "E5";
+        else if (m.contains("errno 138")) h.code = "E2";
+        else h.code = "E3";
+        return h;
+    }
+
+    /**
+     * One REAL health dial: a full MASQUE CONNECT to a well-known host
+     * through the current upstream (Fix G check 4). Unlike the TCP probe
+     * this proves the gateway actually forwards traffic.
+     */
+    public Health healthDial() {
+        Health h = new Health();
+        h.host = currentUpstreamHost();
+        try {
+            UpConn c = dial("www.cloudflare.com", 443);
+            try { c.socket.close(); } catch (Exception ignored) { }
+            h.ok = true;
+            h.code = "OK";
+            h.detail = "CONNECT www.cloudflare.com:443 succeeded via " + h.host;
+            return h;
+        } catch (Exception e) {
+            Health f = classifyDialError(e);
+            f.host = h.host;
+            return f;
+        }
+    }
+
+    /** Fix G check 3: fetch (or reuse) the Guardian pass; throws on failure. */
+    public String passCheck() throws Exception {
+        String p = currentPass();
+        long left = passExpiresSec - System.currentTimeMillis() / 1000;
+        return "pass ok, expires in " + left + " s";
+    }
+
+    /** Classify a pass-fetch failure into a Doctor code (E2/E5/E3/E4). */
+    public String classifyPassError(Exception e) {
+        return classifyDialError(e).code;
+    }
+
+    /**
+     * Fix G check 5: compare the system resolver's answer for the current
+     * MASQUE host against the engine's own DoH answer. A private/CGNAT
+     * system answer is the sinkhole signature seen in the field.
+     */
+    public String dnsCheck() {
+        Upstream up = upstream;
+        if (up == null) return "no upstream picked yet";
+        StringBuilder sb = new StringBuilder();
+        try {
+            InetAddress sys = InetAddress.getByName(up.hostname);
+            sb.append("system DNS ").append(up.hostname).append(" -> ")
+              .append(sys.getHostAddress()).append(isPublic(sys) ? " (public)" : " (PRIVATE — sinkhole signature)");
+        } catch (Exception e) {
+            sb.append("system DNS failed: ").append(e.getMessage());
+        }
+        try {
+            InetAddress good = resolvePublic(up.hostname);
+            sb.append("; engine resolver -> ").append(good.getHostAddress());
+        } catch (Exception e) {
+            sb.append("; engine resolver failed: ").append(e.getMessage());
+        }
+        return sb.toString();
+    }
+
+    /**
+     * Fix I — Smart Connect: real MASQUE CONNECT health dials, in
+     * parallel, against a shortlist (the AUTO set + CA + US). The first
+     * server that actually passes a CONNECT becomes the upstream —
+     * TCP reachability alone (the old probe) is not enough on filtered
+     * networks. Returns the winning description, or null when no
+     * candidate passed (caller keeps the probe-based pick).
+     */
+    public String smartConnect() {
+        try {
+            List<Country> all = loadServerList();
+            String[] codes = {"DE", "NL", "AT", "FR", "BE", "IT", "DK", "ES", "GB", "SE", "CA", "US"};
+            final java.util.Map<Upstream, String> owner = new java.util.HashMap<>();
+            List<Upstream> cands = new ArrayList<>();
+            for (String cc : codes) {
+                for (Country c : all) {
+                    if (!c.code.equals(cc)) continue;
+                    for (Upstream u : c.servers) {
+                        if (isSick(u)) continue;
+                        cands.add(u); owner.put(u, cc);
+                        if (cands.size() >= 16) break;
+                    }
+                }
+                if (cands.size() >= 16) break;
+            }
+            if (cands.isEmpty()) return null;
+            final String pass = currentPass();
+            final java.util.concurrent.atomic.AtomicReference<Upstream> winner =
+                    new java.util.concurrent.atomic.AtomicReference<>();
+            final java.util.concurrent.CountDownLatch done =
+                    new java.util.concurrent.CountDownLatch(1);
+            // Happy-Eyeballs probing (iran.md): waves of 3 candidates
+            // at ~300 ms stagger, so a filtered network is not flooded
+            // with a dozen simultaneous TLS handshakes and the first
+            // healthy server stops the later waves.
+            for (int waveStart = 0; waveStart < cands.size() && winner.get() == null;
+                    waveStart += 3) {
+                int waveEnd = Math.min(waveStart + 3, cands.size());
+                for (int i = waveStart; i < waveEnd; i++) {
+                    final Upstream u = cands.get(i);
+                    Thread t = new Thread(() -> {
+                        try {
+                            UpConn c = openUpstream(u, pass, "www.cloudflare.com", 443, false);
+                            try { c.socket.close(); } catch (Exception ignored) { }
+                            if (winner.compareAndSet(null, u)) done.countDown();
+                        } catch (Exception ignored) { }
+                    }, "fpn-smart");
+                    t.setDaemon(true);
+                    t.start();
+                }
+                if (waveEnd < cands.size() && winner.get() == null)
+                    done.await(300, java.util.concurrent.TimeUnit.MILLISECONDS);
+            }
+            done.await(9, java.util.concurrent.TimeUnit.SECONDS);
+            Upstream w = winner.get();
+            if (w == null) {
+                log("smartconnect: no candidate passed a real CONNECT");
+                return null;
+            }
+            upstream = w;
+            effectiveCountry = owner.get(w);
+            drainPool();
+            startPoolWarmer();
+            log("smartconnect: " + w.hostname + " (" + effectiveCountry + ") healthy");
+            return w.hostname + " (" + effectiveCountry + ")";
+        } catch (Exception e) {
+            log("smartconnect failed: " + e);
+            return null;
+        }
+    }
+
+    // Fix L: byte counters for the local proxy. Every tunneled byte
+    // crosses one of the two splice pumps, so counting here counts all
+    // traffic the tunnel carries — session-scoped, reset per connect;
+    // FpnVpnService folds them into the persisted today/total counters.
+    private final java.util.concurrent.atomic.AtomicLong sessionUp =
+            new java.util.concurrent.atomic.AtomicLong();
+    private final java.util.concurrent.atomic.AtomicLong sessionDown =
+            new java.util.concurrent.atomic.AtomicLong();
+
+    public long sessionBytesUp() { return sessionUp.get(); }
+    public long sessionBytesDown() { return sessionDown.get(); }
+    public void resetSessionCounters() { sessionUp.set(0); sessionDown.set(0); }
+
     private void splice(Socket client, InputStream clientIn, OutputStream clientOut, UpConn up) {
-        Thread a = new Thread(() -> pump(clientIn, up.out, client, up.socket), "fpn-up");
-        Thread b = new Thread(() -> pump(up.in, clientOut, up.socket, client), "fpn-down");
+        Thread a = new Thread(() -> pump(clientIn, up.out, client, up.socket, true), "fpn-up");
+        Thread b = new Thread(() -> pump(up.in, clientOut, up.socket, client, false), "fpn-down");
         a.setDaemon(true); b.setDaemon(true);
         a.start(); b.start();
     }
 
-    private void pump(InputStream in, OutputStream out, Socket s1, Socket s2) {
+    private void pump(InputStream in, OutputStream out, Socket s1, Socket s2, boolean isUp) {
         byte[] buf = new byte[32768];
         try {
             int n;
             while ((n = in.read(buf)) != -1) {
                 out.write(buf, 0, n);
                 out.flush();
+                if (isUp) sessionUp.addAndGet(n); else sessionDown.addAndGet(n);
             }
         } catch (Exception ignored) {}
         try { s1.close(); } catch (Exception ignored) {}
@@ -894,7 +1215,9 @@ public class FpnEngine {
                             .put("server", upstream != null ? upstream.hostname : null)
                             .put("rttMs", upstream != null ? upstream.rttMs : -1)
                             .put("passExpiresInSec", passCache != null
-                                    ? Math.max(0, passExpiresSec - System.currentTimeMillis() / 1000) : JSONObject.NULL);
+                                    ? Math.max(0, passExpiresSec - System.currentTimeMillis() / 1000) : JSONObject.NULL)
+                            .put("bytesUp", sessionUp.get())
+                            .put("bytesDown", sessionDown.get());
                 } else if (u.getPath().equals("/country")) {
                     String c = queryParam(u.getQuery(), "c");
                     if (c == null) { code = 400; obj = new JSONObject().put("error", "missing c"); }
