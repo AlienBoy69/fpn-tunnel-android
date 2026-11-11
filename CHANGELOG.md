@@ -4,7 +4,7 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
-## [4.1.2] — pending release (built, awaiting the maintainer's release order)
+## [4.1.2]
 
 ### Fixed
 - In-app update stalled silently after the download: the PackageInstaller
