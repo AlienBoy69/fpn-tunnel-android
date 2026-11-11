@@ -4,6 +4,17 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [4.1.0]
+
+### In-app updates
+- The app now checks the latest GitHub release on start-up
+- When a newer version exists, a dialog offers to download the APK and
+  install it in place via Android's PackageInstaller — no browser, no
+  manual download
+- "Check for updates" button (shows the current version) for manual checks
+- First use asks for Android's one-time "Install unknown apps" permission
+  for FPN Tunnel, with a shortcut to the right settings page
+
 ## [4.0.0] - 2026-11-12
 
 ### Added

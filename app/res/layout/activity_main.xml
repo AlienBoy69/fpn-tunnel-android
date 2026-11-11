@@ -147,6 +147,16 @@
             android:textColor="#8FA3CC"
             android:textSize="13sp" />
 
+        <Button
+            android:id="@+id/updateBtn"
+            android:layout_width="match_parent"
+            android:layout_height="44dp"
+            android:layout_marginTop="2dp"
+            android:background="@null"
+            android:text="Check for updates"
+            android:textColor="#8FA3CC"
+            android:textSize="13sp" />
+
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"

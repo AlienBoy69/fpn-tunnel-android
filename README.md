@@ -69,6 +69,8 @@ subscription and a phone Mozilla forgot, it is for you.
   a sanitized log bundle (emails, tokens and session material are
   redacted) that you send through any app you choose; the app itself
   never sends anything anywhere
+- ⬆️ **In-app updates** — the app checks the latest GitHub release and
+  can download and install a newer version itself, right inside the app
 - 🛡️ **Hardened upstream path** — MASQUE hosts are resolved over
   DNS-over-HTTPS (the system resolver proved unreliable for them) and the
   upstream TLS chain is validated against the system store with a PKIX

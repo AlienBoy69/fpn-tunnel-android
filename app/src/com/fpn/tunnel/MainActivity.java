@@ -52,6 +52,7 @@ public class MainActivity extends Activity {
     private volatile String exitLoc = null;
     private boolean polling = false;
     private Button diagBtn;
+    private Button updateBtn;
     private volatile long connectStartMs = 0;
     private volatile boolean connectFailed = false;
     private volatile long connectedSince = 0;
@@ -101,6 +102,10 @@ public class MainActivity extends Activity {
         glow = findViewById(R.id.glowView);
         diagBtn = findViewById(R.id.diagBtn);
         diagBtn.setOnClickListener(v -> shareDiagnostics());
+        updateBtn = findViewById(R.id.updateBtn);
+        updateBtn.setText("Check for updates · v" + AppUpdate.currentVersion(this));
+        updateBtn.setOnClickListener(v -> AppUpdate.check(this, true));
+        AppUpdate.check(this, false);
 
         acctBtn.setOnClickListener(v -> {
             Intent si = new Intent(this, SignInActivity.class);
