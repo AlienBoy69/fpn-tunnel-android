@@ -4,6 +4,14 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [4.1.2] — pending release (built, awaiting the maintainer's release order)
+
+### Fixed
+- In-app update stalled silently after the download: the PackageInstaller
+  status callback was sent as an action-only broadcast, which a manifest
+  receiver without an intent-filter never receives, so the system install
+  prompt never appeared. The callback intent is now component-explicit
+
 ## [4.1.1]
 
 ### Fixed

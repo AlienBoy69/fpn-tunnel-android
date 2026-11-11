@@ -231,7 +231,11 @@ public class AppUpdate {
             session.fsync(out);
             out.close();
             in.close();
-            Intent intent = new Intent(ACTION_STATUS).setPackage(act.getPackageName());
+            // Explicit component: a manifest receiver without an intent-filter
+            // only receives component-targeted broadcasts — an action-only
+            // intent silently never arrives (found in on-device testing).
+            Intent intent = new Intent(act, UpdateReceiver.class)
+                    .setAction(ACTION_STATUS);
             PendingIntent pending = PendingIntent.getBroadcast(act, 4242, intent,
                     PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_MUTABLE);
             session.commit(pending.getIntentSender());
