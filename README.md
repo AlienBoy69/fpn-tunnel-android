@@ -19,6 +19,35 @@ connection.
 > Firefox Private Network / Mozilla VPN subscription. Mozilla can change
 > or close the underlying service at any time.
 
+## About this project
+
+Mozilla sells a perfectly good proxy network — Firefox Private Network /
+Mozilla VPN, with MASQUE exits in 33 countries — but if you live outside
+the supported regions there is no official way to use the subscription
+you paid for on an Android phone: the official apps are region-gated,
+and the desktop clients don't help a phone.
+
+FPN Tunnel is the missing client. It signs in with **your own** Firefox
+account on Mozilla's own login page, mints proxy passes from your own
+subscription, and routes the whole phone through Mozilla's own MASQUE
+servers. There is no middleman, no third-party server, and no account
+sharing — the session never leaves your device, and the app talks only
+to Mozilla endpoints.
+
+It was built in Iran, for exactly the conditions users there deal with:
+filtered and unreliable DNS, long routes to overseas exits, and older
+Android devices whose trust stores can't validate newer certificate
+chains. That is why the engine resolves its upstreams over
+DNS-over-HTTPS, measures every nearby exit and picks the fastest one,
+and carries its own Mozilla root store as a validation fallback.
+Development went through three generations in the open: a Termux + Node
+engine with a thin tunnel app (v1), a single self-contained APK with a
+Java engine (v2), and a speed-focused release with fastest-server
+probing, an Auto mode and a connection pool (v3).
+
+The project is MIT-licensed. If you have an FPN / Mozilla VPN
+subscription and a phone Mozilla forgot, it is for you.
+
 ## Features
 
 - 📦 **One APK, nothing else** — the proxy engine is a Java port of the
