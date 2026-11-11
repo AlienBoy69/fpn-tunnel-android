@@ -12,5 +12,8 @@ country.txt
 .launching
 .last_refresh
 
+# Downloaded at build time by build.sh (Mozilla root bundle)
+app/assets/cacert.pem
+
 # Build output
 build/

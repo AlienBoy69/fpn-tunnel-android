@@ -21,12 +21,25 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * One screen: connect / disconnect the FPN whole-phone tunnel, plus a
- * location picker that tells the Termux engine (127.0.0.1:11081) which
- * country new connections should exit from.
+ * One screen: sign in with Firefox, connect / disconnect the FPN
+ * whole-phone tunnel, plus a location picker that tells the in-app
+ * engine (127.0.0.1:11081) which country new connections exit from.
  */
 public class MainActivity extends Activity {
     private TextView status;
+    private Button acctBtn;
+
+    private void refreshAccount() {
+        String email = FpnSession.email(this);
+        acctBtn.setText(email != null ? ("Account: " + email + " (tap to switch)")
+                                      : "Sign in with Firefox");
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        if (acctBtn != null) refreshAccount();
+    }
 
     private static final String[][] COUNTRIES = {
         {"Germany", "DE"}, {"United States", "US"}, {"United Kingdom", "GB"},
@@ -52,12 +65,25 @@ public class MainActivity extends Activity {
 
         status = new TextView(this);
         status.setTextSize(17);
-        status.setText("FPN Tunnel — Firefox Private Network\nProxy: 127.0.0.1:11080 (Termux engine)");
+        status.setText("FPN Tunnel — Firefox Private Network");
         lay.addView(status);
+
+        acctBtn = new Button(this);
+        acctBtn.setOnClickListener(v -> {
+            Intent si = new Intent(this, SignInActivity.class);
+            si.putExtra("switch_account", FpnSession.exists(this));
+            startActivityForResult(si, 2);
+        });
+        lay.addView(acctBtn);
+        refreshAccount();
 
         Button on = new Button(this);
         on.setText("Connect");
         on.setOnClickListener(v -> {
+            if (!FpnSession.exists(this)) {
+                status.setText("Sign in with Firefox first.");
+                return;
+            }
             Intent prep = VpnService.prepare(this);
             if (prep != null) startActivityForResult(prep, 1);
             else startTunnel();
@@ -95,6 +121,11 @@ public class MainActivity extends Activity {
                 final String code = COUNTRIES[pos][1];
                 final String name = COUNTRIES[pos][0];
                 prefs.edit().putString("country", code).apply();
+                // the engine reads country.txt at start; the live push below covers a running engine
+                try {
+                    java.io.FileWriter w = new java.io.FileWriter(new java.io.File(getFilesDir(), "country.txt"));
+                    w.write(code + "\n"); w.close();
+                } catch (Exception ignored) {}
                 if (code.equals(lastCode)) return; // initial layout fire, or no change
                 lastCode = code;
                 new Thread(() -> {
@@ -133,6 +164,10 @@ public class MainActivity extends Activity {
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
         if (requestCode == 1 && resultCode == RESULT_OK) startTunnel();
+        if (requestCode == 2) {
+            refreshAccount();
+            if (resultCode == RESULT_OK) status.setText("Signed in. You can Connect now.");
+        }
     }
 
     private void startTunnel() {

@@ -12,7 +12,7 @@ HEV=/tmp/hev-aar
 export JAVA_HOME="$TC/jdk"
 export PATH="$JAVA_HOME/bin:$PATH"
 cd "$ROOT"
-mkdir -p build/classes build/gen build/out build/native/lib/arm64-v8a keys
+mkdir -p build/classes build/gen build/out build/native/lib/arm64-v8a build/native/lib/armeabi-v7a keys
 chmod 700 keys
 if [ ! -f keys/release.keystore ]; then
   PW=$(head -c 18 /dev/urandom | base64 | tr -d '/+=' | head -c 20)
@@ -24,14 +24,18 @@ if [ ! -f keys/release.keystore ]; then
   echo "keystore created"
 fi
 PW=$(cat keys/keystore_password.txt)
+# Mozilla root bundle for the engine's upstream TLS fallback (gitignored;
+# build-time download, preamble stripped — the app parses it block by block)
+[ -f app/assets/cacert.pem ] || { mkdir -p app/assets && curl -sL -o /tmp/cacert.pem https://curl.se/ca/cacert.pem && sed -n '/-----BEGIN CERTIFICATE-----/,$p' /tmp/cacert.pem > app/assets/cacert.pem; }
 # classes.jar of hev (extract if needed)
 [ -f "$HEV/classes.jar" ] || { curl -sL -o /tmp/hev.aar https://github.com/heiher/hev-socks5-tunnel/releases/download/2.18.0/hev-socks5-tunnel.aar && unzip -o -q /tmp/hev.aar -d "$HEV"; }
 cp "$HEV/jni/arm64-v8a/libhev-socks5-tunnel.so" build/native/lib/arm64-v8a/
+cp "$HEV/jni/armeabi-v7a/libhev-socks5-tunnel.so" build/native/lib/armeabi-v7a/
 # 1) resources + manifest
 "$BT/aapt2" compile --dir app/res -o build/res.zip
 "$BT/aapt2" link -o build/out/app-unsigned.apk -I "$AJ" \
-  --manifest app/AndroidManifest.xml -R build/res.zip \
-  --version-code 1 --version-name 1.0 \
+  --manifest app/AndroidManifest.xml -R build/res.zip -A app/assets \
+  --version-code 8 --version-name 2.0.6 \
   --java build/gen --auto-add-overlay
 # 2) compile (app + hev classes.jar as lib + generated R)
 find app/src -name '*.java' > build/sources.txt
@@ -43,7 +47,7 @@ rm -rf build/dex && mkdir -p build/dex
 # 4) pack dex + native lib, align, sign
 cp build/out/app-unsigned.apk build/out/app-tmp.apk
 (cd build/dex && zip -q -X ../out/app-tmp.apk classes.dex)
-(cd build/native && zip -q -X -0 ../out/app-tmp.apk lib/arm64-v8a/libhev-socks5-tunnel.so)
+(cd build/native && zip -q -X -0 -r ../out/app-tmp.apk lib)
 "$BT/zipalign" -f -p 4 build/out/app-tmp.apk build/out/app-aligned.apk
 "$BT/apksigner" sign --ks keys/release.keystore --ks-pass "pass:$PW" \
   --key-pass "pass:$PW" --out build/out/FpnTunnel.apk build/out/app-aligned.apk

@@ -2,18 +2,18 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Android](https://img.shields.io/badge/Android-12%2B-blue.svg)](#requirements)
-[![Node](https://img.shields.io/badge/Node-18%2B-green.svg)](#requirements)
 [![GitHub stars](https://img.shields.io/github/stars/msgornami/fpn-tunnel-android?style=social)](https://github.com/msgornami/fpn-tunnel-android/stargazers)
 
 A whole-phone **Firefox Private Network** (Mozilla's FPN / Mozilla VPN
-subscription) client for Android — no laptop, no desktop app, no dependency
-on Mozilla's region-gated UI. It mints a proxy pass from *your own* Firefox
-account session and routes the whole phone through Mozilla's MASQUE proxies,
-with a **location picker (33 countries)**.
+subscription) client for Android in a **single APK** — no Termux, no Node,
+no root, no laptop. Sign in with your own Firefox account inside the app,
+pick an exit country, and the whole phone routes through Mozilla's MASQUE
+proxies.
 
-Built and verified end to end on a rooted Samsung Note10+ (Android 12):
-exit in Germany / US / Netherlands confirmed by IP trace, X loading through
-the tunnel, and split tunneling so chosen apps stay on the direct connection.
+Built and verified end to end on a Samsung Note10+ (Android 12): sign-in,
+engine and tunnel all in-app; exit in Canada / Netherlands / Germany
+confirmed by IP trace; split tunneling keeps chosen apps on the direct
+connection.
 
 > **Unofficial.** Not affiliated with Mozilla. Use it with your own paid
 > Firefox Private Network / Mozilla VPN subscription. Mozilla can change
@@ -21,179 +21,104 @@ the tunnel, and split tunneling so chosen apps stay on the direct connection.
 
 ## Features
 
-- 🌍 **Whole-phone tunnel** — every app goes through the VPN slot, not just a browser
+- 📦 **One APK, nothing else** — the proxy engine is a Java port of the
+  audited foxhole core and runs inside the app itself
+- 🔑 **Sign-in in the app** — Mozilla's own login page in a WebView
+  (WebChannel flow, the same method Mozilla's mobile clients use); the
+  session never leaves the device and the login is one-time
+- 🌍 **Whole-phone tunnel** — every app goes through the VPN slot, not
+  just a browser
 - 🗺️ **33-country location picker** — switch exit country live from the app
-- 🔀 **Split tunneling** — keep banking apps and geo-sensitive services off the tunnel
-- 🔄 **Self-maintaining engine** — 10-minute proxy passes refetch automatically; optional daily session refresh
-- 📴 **No middleman** — talks to Mozilla's own FxA, Guardian and MASQUE servers directly from your phone
-- 🧩 **No build required** — prebuilt APK in Releases; build from source if you prefer
+- 🔀 **Split tunneling** — keep banking apps and geo-sensitive services
+  off the tunnel (edit the `SKIP` list in `FpnVpnService.java`)
+- 🔄 **Self-maintaining engine** — 10-minute proxy passes refetch
+  automatically
+- 🛡️ **Hardened upstream path** — MASQUE hosts are resolved over
+  DNS-over-HTTPS (the system resolver proved unreliable for them) and the
+  upstream TLS chain is validated against the system store with a PKIX
+  fallback anchored in a bundled Mozilla root store (some MASQUE chains
+  anchor in newer ECC roots that older Android stores lack)
 
 ## Download
 
 Grab **`FpnTunnel.apk`** from the
-[Releases](https://github.com/msgornami/fpn-tunnel-android/releases) page.
-
-> The APK replaces only the *build* step. The Termux engine (below) is
-> still required — the app alone does nothing without it.
+[Releases](https://github.com/msgornami/fpn-tunnel-android/releases) page,
+install it, and follow the quick start below. That's all — there is no
+separate engine to set up.
 
 **Persian step-by-step guide (راهنمای فارسی):** [docs/guide-fa.md](docs/guide-fa.md)
 
 ## Quick start
 
-1. **Engine:** copy `engine/*` into `~/foxhole-android/` in Termux, install
-   Node LTS, and give the engine your Firefox session
-   (`extract_session.py`, or a `signedInUser.json` from desktop Firefox).
-2. **Run it:** `bash ~/foxhole-android/launch_engine.sh`, then check
-   `curl http://127.0.0.1:11081/status`.
-3. **App:** install the APK, open **FPN Tunnel**, grant the VPN permission,
-   tap **Connect**, pick a country from the **Location** menu.
-
-Full instructions: [Setup](#setup) · [راهنمای فارسی](docs/guide-fa.md)
+1. **Install** the APK and open **FPN Tunnel**.
+2. **Sign in:** tap the account button and log in on Mozilla's own page
+   (Google sign-in works there). One-time — the app keeps the session.
+3. **Pick a country** in the **Location** menu.
+4. **Tap Connect** and grant the Android VPN permission once.
 
 ## How it works
 
 ```
 ┌─────────────┐   VpnService (hev-socks5-tunnel)   ┌──────────────────┐
-│  all apps   │ ─────────────────────────────────▶ │  local proxy     │
-│  (minus     │        TUN, IPv4 only              │  127.0.0.1:11080 │
-│  exclusions)│                                    │  (Termux, Node)  │
+│  all apps   │ ─────────────────────────────────▶ │  in-app engine   │
+│  (minus     │        TUN, IPv4 only              │  proxy on        │
+│  exclusions)│                                    │  127.0.0.1:11080 │
 └─────────────┘                                    └────────┬─────────┘
-                                                            │ MASQUE CONNECT
-                                                   Mozilla proxy pass  ▼
-                                                   (10 min, auto-refreshed)
-                                                   ┌──────────────────┐
-                                                   │ *.m1.fastly-     │
-                                                   │ masque.net:2499  │
-                                                   │ exit: chosen     │
-                                                   │ country          │
-                                                   └──────────────────┘
+                                                            │ TLS (CONNECT
+                                                            │  + proxy pass)
+                                                  ┌─────────▼─────────┐
+                                                  │ Mozilla MASQUE    │
+                                                  │ *.m1.fastly-      │
+                                                  │ masque.net:2499   │
+                                                  └───────────────────┘
 ```
 
-Two parts:
+The engine mints short-lived proxy passes from your Firefox session
+(FxA token → Guardian API), keeps one alive at all times, and forwards
+the local SOCKS5/HTTP proxy through the selected country's MASQUE
+server. A loopback control API on `127.0.0.1:11081` (`/status`,
+`/country?c=XX`, `/countries`) connects the UI's location picker to the
+engine.
 
-1. **Engine (Termux, Node.js)** — `engine/run-fpn.mjs`
-   - Reads your Firefox session from a `signedInUser.json`, derives FxA
-     keys (HAWK/onepw, HKDF-SHA256), mints an OAuth access token, and
-     fetches a short-lived proxy pass from Mozilla's Guardian API.
-   - Serves SOCKS5 + HTTP on `127.0.0.1:11080` and forwards through a
-     MASQUE proxy in the selected country (server list: Mozilla's public
-     Remote Settings `vpn-serverlist`).
-   - A loopback-only control API on `127.0.0.1:11081` (`/status`,
-     `/country?c=XX`, `/countries`) lets the app switch location live;
-     the choice persists in `country.txt`.
+## Build from source
 
-2. **Tunnel app** — `app/` (a small hand-built `VpnService` app)
-   - Uses [hev-socks5-tunnel](https://github.com/heiher/hev-socks5-tunnel)
-     (the same TUN library Foxhole's Android app uses) to fill Android's
-     VPN slot and forward everything to the local proxy.
-   - **IPv4 only** — the MASQUE pass refuses raw-IP destinations, and
-     tunneling IPv6 breaks apps; IPv4-only avoids that whole class.
-   - **Split tunneling** — Termux, the app itself, and any packages you
-     list in `FpnVpnService.SKIP` bypass the VPN. Keep your banking apps
-     (a foreign exit can trip fraud locks) and any service that
-     geo-blocks the exit countries out of the tunnel.
-   - UI: Connect / Disconnect and a Location dropdown (33 countries).
-
-The protocol work is a port of [foxhole-vpn](https://github.com/Diercohen/foxhole-vpn)
-(MIT) — auth, Guardian and proxy logic follow its audited implementation.
-
-## Requirements
-
-- A Firefox account with an **FPN / Mozilla VPN subscription**.
-- **Firefox Android, signed in** with that account (or a
-  `signedInUser.json` copied from your desktop Firefox profile).
-- **Termux** with Node.js LTS (`engine/install_node.sh`).
-- **Root**, for two things: extracting the session from Firefox
-  Android's private store, and launching the engine so it survives
-  (Termux `RUN_COMMAND`). Without root you can still run the engine
-  manually in a Termux session, and you can supply the session file
-  from a desktop profile instead of extracting it.
-- To build the app yourself: a JDK + Android SDK (build-tools 34,
-  platform android-34). No Gradle — `build.sh` drives
-  aapt2/javac/d8 directly.
-
-## Setup
-
-### 1. Engine (in Termux)
+Needs a JDK and the Android SDK (build-tools 34 + platform android-34).
+Point `ANDROID_TOOLCHAIN` at a directory containing `sdk/` and `jdk/`
+(see the top of `build.sh`), then:
 
 ```sh
-pkg install -y git nodejs-lts python
-git clone https://github.com/msgornami/fpn-tunnel-android
-mkdir -p ~/foxhole-android
-cp fpn-tunnel-android/engine/* ~/foxhole-android/
+./build.sh   # downloads the hev AAR + the Mozilla root bundle, signs locally
 ```
 
-Give the engine your Firefox session — pick **one**:
+The signing key is generated locally on first run (`keys/`, gitignored).
+Output: `build/out/FpnTunnel.apk`.
 
-- **From Firefox Android (root):**
-  `python3 ~/foxhole-android/extract_session.py`
-  (Firefox Android has no `signedInUser.json`; the session lives in its
-  accounts localStorage DB and is recovered from the raw bytes.)
-- **From desktop Firefox (no root needed):** sign into Firefox on a
-  computer with the same account, find `signedInUser.json` in your
-  profile folder, and copy it to
-  `~/.mozilla/firefox/foxhole.default/signedInUser.json` in Termux.
+## Legacy: Termux engine (v1)
 
-Start it (durable launch via RUN_COMMAND — processes started from an
-SSH session get reaped when the session ends):
+The `engine/` folder keeps the original Node/Termux variant: a separate
+engine process (`run-fpn.mjs`) driven by a session extracted from
+Firefox, with the app as a thin tunnel shell. It still works and is
+useful on rooted devices, but the single-APK build above is the
+supported path for most users.
 
-```sh
-bash ~/foxhole-android/launch_engine.sh
-curl http://127.0.0.1:11081/status     # {"country":"DE", ...}
-curl --socks5-hostname 127.0.0.1:11080 https://www.cloudflare.com/cdn-cgi/trace
-```
+## Known limitations
 
-Optional: put `keepalive.sh` in `~/.termux/boot/` (Termux:Boot) — it
-relaunches the engine and refreshes the extracted session about daily.
-
-### 2. App
-
-Either install the prebuilt `FpnTunnel.apk` from
-[Releases](https://github.com/msgornami/fpn-tunnel-android/releases), or
-build it yourself:
-
-```sh
-./build.sh        # produces build/out/FpnTunnel.apk, signed with a local key
-adb install build/out/FpnTunnel.apk   # or copy it to the phone and open it
-```
-
-Open **FPN Tunnel**, grant the VPN permission, tap **Connect**, and pick
-a location from the dropdown. Switching location applies to new
-connections; for an instant full switch, Disconnect → Connect once.
-
-## Known limits
-
-- Mozilla's proxies refuse connections to **raw IP addresses** (only
-  hostnames work) and block some ports (e.g. Google FCM `5228`), so a
-  few apps' push notifications can lag while the tunnel is up.
-- Passes live **10 minutes**; the engine refetches them automatically.
-- One Android VPN slot: this tunnel replaces any other VPN app while
-  connected.
-- Speed is capped by Mozilla's MASQUE service, not by this code.
-
-## Security
-
-Your `signedInUser.json` is a **live account credential** — never share
-it, never commit it (it is gitignored). The engine and its control API
-listen on loopback only. See [SECURITY.md](SECURITY.md) for the
-reporting policy.
-
-## Contributing
-
-Issues and pull requests are welcome — see
-[CONTRIBUTING.md](CONTRIBUTING.md). Please keep credentials, session
-files and device identifiers out of every report and diff.
+- Mozilla's MASQUE proxies refuse raw-IP destinations and some ports
+  (e.g. FCM 5228) — push notifications for some apps can lag, and
+  direct-IP connections (some Telegram traffic) fail by design.
+- A Mozilla/Firefox account with an active FPN / Mozilla VPN
+  subscription is required; the app cannot create one for you.
+- Android may drop the VPN permission when the app is updated; if
+  Connect stops working after an update, open the app and tap Connect
+  again (re-granting if asked).
 
 ## Credits
 
-- [foxhole-vpn](https://github.com/Diercohen/foxhole-vpn) by Dier Cohen
-  (MIT) — the protocol implementation this engine's auth/Guardian/proxy
-  core is ported from.
-- [hev-socks5-tunnel](https://github.com/heiher/hev-socks5-tunnel)
-  (MIT) — the TUN forwarder; download its AAR (v2.18.0) from its
-  releases — `build.sh` fetches it automatically.
+The engine is a port of the open-source
+[foxhole](https://github.com/DierCodes/foxhole) core logic (MIT) to
+Java, with the tunnel provided by
+[hev-socks5-tunnel](https://github.com/heiher/hev-socks5-tunnel).
 
 ## License
 
-MIT — see [LICENSE](LICENSE). Third-party components keep their own
-licenses (both MIT, above).
+MIT — see [LICENSE](LICENSE).

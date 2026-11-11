@@ -23,8 +23,9 @@ import hev.htproxy.TProxyService;
 /**
  * Whole-phone tunnel for the FPN Tunnel client: Android's
  * VPN slot, filled by hev-socks5-tunnel forwarding everything to the local
- * FPN proxy (127.0.0.1:11080, run-fpn.mjs in Termux). Same architecture as
- * Foxhole's own Android app (its FoxholeService.kt), minus the app around it.
+ * FPN proxy (127.0.0.1:11080), served by the in-app FpnEngine in this same
+ * process. Same architecture as Foxhole's own Android app (its
+ * FoxholeService.kt), minus the app around it.
  */
 public class FpnVpnService extends VpnService {
     private static final String TAG = "fpntunnel";
@@ -38,6 +39,7 @@ public class FpnVpnService extends VpnService {
             "com.termux", "com.fpn.tunnel", "com.facebook.aura", "com.tosan.dara.sina" };
 
     private ParcelFileDescriptor tun;
+    private FpnEngine engine;
 
     /** Append a line to files/fpn_log.txt so failures are visible without logcat. */
     private void flog(String s) {
@@ -87,6 +89,15 @@ public class FpnVpnService extends VpnService {
     private void tunnelOn() {
         try {
             tunnelOff();
+            if (engine == null) {
+                engine = new FpnEngine(new File(getFilesDir(), "session.json"),
+                        new File(getFilesDir(), "country.txt"),
+                        new File(getFilesDir(), "engine_log.txt"),
+                        FpnEngine.buildUpstreamFactory(this,
+                                new File(getFilesDir(), "engine_log.txt")));
+                engine.start(); // throws when signed out or the auth is refused
+                flog("engine up");
+            }
             Builder b = new Builder()
                     .setSession("FPN Tunnel")
                     .setMtu(8500)
@@ -129,6 +140,11 @@ public class FpnVpnService extends VpnService {
     }
 
     private synchronized void tunnelOff() {
+        if (engine != null) {
+            try { engine.stop(); } catch (Exception ignored) {}
+            engine = null;
+            flog("engine stopped");
+        }
         if (tun == null) return;
         ParcelFileDescriptor fd = tun;
         tun = null;
