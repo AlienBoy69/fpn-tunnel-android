@@ -77,15 +77,23 @@ public class FpnVpnService extends VpnService {
         snapUp = up; snapDown = down;
         if (dUp == 0 && dDown == 0) return;
         android.content.SharedPreferences p = usagePrefs();
+        // Fix Q: counters are per-account (keyed by the active uid);
+        // pre-multi-account totals were attributed to account #1 by
+        // the FpnSession migration.
+        String kDate = FpnSession.usageKey(this, "usageDate");
+        String kTUp = FpnSession.usageKey(this, "usageTodayUp");
+        String kTDown = FpnSession.usageKey(this, "usageTodayDown");
+        String kTotUp = FpnSession.usageKey(this, "usageTotalUp");
+        String kTotDown = FpnSession.usageKey(this, "usageTotalDown");
         String today = todayKey();
-        long tUp = today.equals(p.getString("usageDate", "")) ? p.getLong("usageTodayUp", 0) : 0;
-        long tDown = today.equals(p.getString("usageDate", "")) ? p.getLong("usageTodayDown", 0) : 0;
+        long tUp = today.equals(p.getString(kDate, "")) ? p.getLong(kTUp, 0) : 0;
+        long tDown = today.equals(p.getString(kDate, "")) ? p.getLong(kTDown, 0) : 0;
         p.edit()
-                .putString("usageDate", today)
-                .putLong("usageTodayUp", tUp + dUp)
-                .putLong("usageTodayDown", tDown + dDown)
-                .putLong("usageTotalUp", p.getLong("usageTotalUp", 0) + dUp)
-                .putLong("usageTotalDown", p.getLong("usageTotalDown", 0) + dDown)
+                .putString(kDate, today)
+                .putLong(kTUp, tUp + dUp)
+                .putLong(kTDown, tDown + dDown)
+                .putLong(kTotUp, p.getLong(kTotUp, 0) + dUp)
+                .putLong(kTotDown, p.getLong(kTotDown, 0) + dDown)
                 .apply();
     }
 
@@ -194,7 +202,7 @@ public class FpnVpnService extends VpnService {
 
     /** Build (but do not start) an engine bound to this app's files. */
     FpnEngine newEngine() {
-        return new FpnEngine(new File(getFilesDir(), "session.json"),
+        return new FpnEngine(FpnSession.file(this),
                 new File(getFilesDir(), "country.txt"),
                 new File(getFilesDir(), "engine_log.txt"),
                 FpnEngine.buildUpstreamFactory(this,
@@ -221,13 +229,27 @@ public class FpnVpnService extends VpnService {
         return engine;
     }
 
-    private void tunnelOn() {
+    // Serialized: the Doctor (R5), the watchdog and onStartCommand can
+    // all ask for a tunnel start; interleaved tunnelOn calls race the
+    // engine bind. One at a time.
+    private synchronized void tunnelOn() {
         try {
             lastEstablishNull = false;
             tunnelOff();
             if (engine == null) {
                 engine = newEngine();
-                engine.start(); // throws when signed out or the auth is refused
+                try {
+                    engine.start(); // throws when signed out or the auth is refused
+                } catch (java.net.BindException be) {
+                    // A previous engine may still be releasing the
+                    // proxy ports — give it a beat and retry once
+                    // instead of wedging every later connect.
+                    flog("engine bind busy, retrying once: " + be.getMessage());
+                    try { engine.stop(); } catch (Exception ignored) {}
+                    try { Thread.sleep(700); } catch (InterruptedException ignored) {}
+                    engine = newEngine();
+                    engine.start();
+                }
                 flog("engine up");
                 // Fix I: on the first connect, prove a real MASQUE
                 // CONNECT works and keep the server that passes it.

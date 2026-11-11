@@ -42,8 +42,8 @@ cp "$HEV/jni/armeabi-v7a/libhev-socks5-tunnel.so" build/native/lib/armeabi-v7a/
 "$BT/aapt2" compile --dir app/res -o build/res.zip
 "$BT/aapt2" link -o build/out/app-unsigned.apk -I "$AJ" \
   --manifest app/AndroidManifest.xml -R build/res.zip -A app/assets \
-  --version-code 17 --version-name 4.2.0 \
-  --min-sdk-version 29 --target-sdk-version 34 \
+  --version-code 19 --version-name 4.3.0 \
+  --min-sdk-version 25 --target-sdk-version 34 \
   --java build/gen --auto-add-overlay
 # 2) compile (app + hev classes.jar as lib + generated R)
 find app/src -name '*.java' > build/sources.txt

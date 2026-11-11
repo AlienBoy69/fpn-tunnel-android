@@ -41,6 +41,12 @@ public final class ConnectionDoctor {
     private final FpnVpnService svc;
     private final List<String> checks = new ArrayList<>();
     private final List<String> repairs = new ArrayList<>();
+    // An engine this run created for diagnosis. It is NOT the service's
+    // engine, so nothing else will ever stop it — if it is left running
+    // it holds the proxy/control ports forever and every later connect
+    // dies with EADDRINUSE (the 4.2.0 wedge). It must be released
+    // before any service-level tunnel start and when the run ends.
+    private FpnEngine diagEngine;
 
     private ConnectionDoctor(FpnVpnService svc) { this.svc = svc; }
 
@@ -95,6 +101,24 @@ public final class ConnectionDoctor {
     private void dlog(String s) { svc.flog("doctor: " + s); }
 
     private void run(boolean manual) {
+        try {
+            runInternal(manual);
+        } finally {
+            releaseDiagEngine();
+        }
+    }
+
+    /** Stop the diagnostic engine if this run created one and it was
+     *  not adopted as the service's engine. Safe to call repeatedly. */
+    private void releaseDiagEngine() {
+        if (diagEngine != null && diagEngine != svc.engineRef()) {
+            stopQuietly(diagEngine);
+            dlog("diagnostic engine released");
+        }
+        diagEngine = null;
+    }
+
+    private void runInternal(boolean manual) {
         dlog("start (" + (manual ? "manual" : "auto") + ")");
         // Check 1 — session present
         if (!FpnSession.exists(svc)) {
@@ -120,6 +144,7 @@ public final class ConnectionDoctor {
                 eng = svc.newEngine();
                 eng.start();
                 ownEngine = true;
+                diagEngine = eng;
                 checks.add("Engine: started for diagnosis");
                 dlog("engine started for diagnosis");
             } catch (Exception e) {
@@ -158,6 +183,9 @@ public final class ConnectionDoctor {
             checks.add("Exit health: OK — " + h.detail);
             dlog("check: health dial OK via " + h.host);
             if (!svc.tunnelRunning()) {
+                // The service binds its own engine — release the
+                // diagnostic one first or the bind collides (EADDRINUSE).
+                releaseDiagEngine();
                 svc.startTunnelInternal();
                 if (svc.tunnelRunning()) {
                     repairs.add("Started the VPN tunnel — worked");
@@ -220,7 +248,10 @@ public final class ConnectionDoctor {
         } else {
             repairs.add("Smart Connect: no candidate passed a real CONNECT");
         }
-        // R4 — restart the engine
+        // R4 — restart the engine. The repair ladder above ran on the
+        // diagnostic engine if we created one; release it before the
+        // service-level restarts (R4/R5) bind their own engine.
+        releaseDiagEngine();
         try {
             eng = svc.restartEngineOnly();
             if (healthOk(eng)) {

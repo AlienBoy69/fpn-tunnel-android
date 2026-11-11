@@ -97,8 +97,100 @@ public class MainActivity extends Activity {
             return;
         }
         String email = FpnSession.email(this);
-        acctBtn.setText(email != null ? ("👤  " + email + "  ·  tap to switch")
-                                      : "Sign in with Firefox");
+        if (email == null) {
+            acctBtn.setText("Sign in with Firefox");
+            return;
+        }
+        int n = FpnSession.listAccounts(this).size();
+        acctBtn.setText("👤  " + email + (n > 1 ? "  (+" + (n - 1) + " more)" : "")
+                + "  ·  tap to switch");
+    }
+
+    // ── Fix Q: multi-account switcher ────────────────────────────────
+    // The account button opens the store: tap an account to make it
+    // active (the tunnel restarts on it if it was up), Add signs in
+    // another account (it is added, never overwriting the others),
+    // Remove deletes one from this device after a confirm.
+
+    private void openAccounts() {
+        final java.util.List<FpnSession.Account> accs = FpnSession.listAccounts(this);
+        if (accs.isEmpty()) {
+            Intent si = new Intent(this, SignInActivity.class);
+            si.putExtra("switch_account", FpnSession.exists(this));
+            startActivityForResult(si, 2);
+            return;
+        }
+        final String active = FpnSession.activeUid(this);
+        String[] labels = new String[accs.size()];
+        for (int i = 0; i < accs.size(); i++)
+            labels[i] = (accs.get(i).uid.equals(active) ? "●  " : "○  ") + accs.get(i).email;
+        new android.app.AlertDialog.Builder(this)
+                .setTitle("Accounts")
+                .setItems(labels, (d, w) -> {
+                    if (!accs.get(w).uid.equals(active)) switchAccount(accs.get(w).uid);
+                })
+                .setNeutralButton("Add account", (d, w) -> {
+                    Intent si = new Intent(this, SignInActivity.class);
+                    si.putExtra("switch_account", true);
+                    startActivityForResult(si, 2);
+                })
+                .setNegativeButton("Remove…", (d, w) -> openRemoveAccount(accs))
+                .setPositiveButton("Close", null)
+                .show();
+    }
+
+    private void openRemoveAccount(final java.util.List<FpnSession.Account> accs) {
+        String[] labels = new String[accs.size()];
+        for (int i = 0; i < accs.size(); i++) labels[i] = accs.get(i).email;
+        new android.app.AlertDialog.Builder(this)
+                .setTitle("Remove which account?")
+                .setItems(labels, (d, w) -> {
+                    final FpnSession.Account victim = accs.get(w);
+                    new android.app.AlertDialog.Builder(this)
+                            .setTitle("Remove account")
+                            .setMessage("Remove " + victim.email + " from this device? "
+                                    + "Its saved sign-in here will be deleted. "
+                                    + "The account itself is not affected.")
+                            .setNegativeButton("Cancel", null)
+                            .setPositiveButton("Remove", (dd, ww) -> {
+                                boolean wasActive = victim.uid.equals(FpnSession.activeUid(this));
+                                boolean restart = wasActive
+                                        && (connected || connecting
+                                            || getSharedPreferences("fpn", MODE_PRIVATE)
+                                                .getBoolean("wasConnected", false));
+                                if (wasActive)
+                                    startService(new Intent(this, FpnVpnService.class).setAction("stop"));
+                                FpnSession.removeAccount(this, victim.uid);
+                                refreshAccount();
+                                if (!FpnSession.exists(this)) {
+                                    setStateUi(false, false, null, -1);
+                                    recreate();
+                                } else if (restart) {
+                                    ui.postDelayed(this::attemptConnect, 900);
+                                } else {
+                                    recreate();
+                                }
+                            })
+                            .show();
+                })
+                .setNegativeButton("Cancel", null)
+                .show();
+    }
+
+    /** Switch the active account; a running tunnel restarts on it. */
+    private void switchAccount(String uid) {
+        boolean restart = connected || connecting
+                || getSharedPreferences("fpn", MODE_PRIVATE).getBoolean("wasConnected", false);
+        startService(new Intent(this, FpnVpnService.class).setAction("stop"));
+        connecting = false;
+        FpnSession.setActive(this, uid);
+        refreshAccount();
+        if (restart) {
+            setStateUi(false, false, null, -1);
+            ui.postDelayed(this::attemptConnect, 900);
+        } else {
+            recreate();
+        }
     }
 
     @Override
@@ -167,9 +259,7 @@ public class MainActivity extends Activity {
 
         acctBtn.setOnClickListener(v -> {
             if (BiometricLock.isSealed(this)) { unlockThen(() -> refreshAccount()); return; }
-            Intent si = new Intent(this, SignInActivity.class);
-            si.putExtra("switch_account", FpnSession.exists(this));
-            startActivityForResult(si, 2);
+            openAccounts();
         });
         refreshAccount();
 
@@ -475,10 +565,13 @@ public class MainActivity extends Activity {
     private void updateUsageUi() {
         SharedPreferences p = getSharedPreferences("fpn", MODE_PRIVATE);
         String today = FpnVpnService.todayKey();
-        long tUp = today.equals(p.getString("usageDate", "")) ? p.getLong("usageTodayUp", 0) : 0;
-        long tDown = today.equals(p.getString("usageDate", "")) ? p.getLong("usageTodayDown", 0) : 0;
-        long totUp = p.getLong("usageTotalUp", 0);
-        long totDown = p.getLong("usageTotalDown", 0);
+        // Fix Q: the readout shows the ACTIVE account's counters.
+        long tUp = today.equals(p.getString(FpnSession.usageKey(this, "usageDate"), ""))
+                ? p.getLong(FpnSession.usageKey(this, "usageTodayUp"), 0) : 0;
+        long tDown = today.equals(p.getString(FpnSession.usageKey(this, "usageDate"), ""))
+                ? p.getLong(FpnSession.usageKey(this, "usageTodayDown"), 0) : 0;
+        long totUp = p.getLong(FpnSession.usageKey(this, "usageTotalUp"), 0);
+        long totDown = p.getLong(FpnSession.usageKey(this, "usageTotalDown"), 0);
         StringBuilder sb = new StringBuilder("Plan: Unlimited");
         if (connected && sessUp >= 0) {
             sb.append("  ·  ↓ ").append(FpnVpnService.fmtBytes(sessDown))

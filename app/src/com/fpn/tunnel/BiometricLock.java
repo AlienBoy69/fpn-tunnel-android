@@ -20,21 +20,27 @@ import javax.crypto.SecretKey;
 import javax.crypto.spec.GCMParameterSpec;
 
 /**
- * Fix H (optional) — "Lock with biometrics": the Firefox session file
- * is sealed with an AndroidKeyStore AES key that itself requires user
+ * Fix H (optional) — "Lock with biometrics": the Firefox sign-in is
+ * sealed with an AndroidKeyStore AES key that itself requires user
  * authentication, so Android shows the system fingerprint / lockscreen
- * prompt before the session can be used to connect. Framework APIs
+ * prompt before the sign-in can be used to connect. Framework APIs
  * only (android.hardware.biometrics), no new dependencies.
  *
- * Sealed form: files/session.json.enc = [1-byte IV length][IV][AES-GCM
- * ciphertext]. While sealed, session.json is absent, so the engine
- * (and boot auto-connect) cannot use the session until the user
- * unlocks it in the app. Unlocking restores session.json for the rest
- * of the process; the next cold start re-seals it.
+ * Since Fix Q the seal covers the WHOLE account store: the sealed
+ * form is files/accounts.enc = [1-byte IV length][IV][AES-GCM
+ * ciphertext of a JSON bundle {activeUid, accounts{uid: accountData}}].
+ * While sealed, no plaintext account file (and no session.json
+ * mirror) exists, so the engine (and boot auto-connect) cannot use
+ * any account until the user unlocks in the app. Unlocking restores
+ * the store for the rest of the process; the next cold start
+ * re-seals it. The pre-multi-account form (session.json.enc, a raw
+ * single session) is still understood: unlocking one migrates it
+ * into the store and re-seals in the new format.
  */
 public final class BiometricLock {
     private static final String ALIAS = "fpn_session_key";
-    private static final String ENC_NAME = "session.json.enc";
+    private static final String ENC_NAME = "accounts.enc";
+    private static final String LEGACY_ENC_NAME = "session.json.enc";
 
     private BiometricLock() {}
 
@@ -49,16 +55,25 @@ public final class BiometricLock {
     }
 
     public static boolean isSealed(Context ctx) {
-        return isEnabled(ctx) && encFile(ctx).exists() && !FpnSession.file(ctx).exists();
+        return isEnabled(ctx)
+                && (encFile(ctx).exists() || legacyEncFile(ctx).exists())
+                && !FpnSession.hasPlainStore(ctx);
     }
 
     private static File encFile(Context ctx) {
         return new File(ctx.getFilesDir(), ENC_NAME);
     }
 
+    private static File legacyEncFile(Context ctx) {
+        return new File(ctx.getFilesDir(), LEGACY_ENC_NAME);
+    }
+
     /** Cold start: if both forms exist, the plain one is stale — re-seal. */
     public static void reseal(Context ctx) {
-        if (isEnabled(ctx) && encFile(ctx).exists() && FpnSession.file(ctx).exists())
+        if (!isEnabled(ctx)) return;
+        if (encFile(ctx).exists() && FpnSession.hasPlainStore(ctx))
+            FpnSession.deletePlainStore(ctx);
+        else if (legacyEncFile(ctx).exists() && FpnSession.file(ctx).exists())
             FpnSession.file(ctx).delete();
     }
 
@@ -132,16 +147,18 @@ public final class BiometricLock {
                 act.getMainExecutor(), callback);
     }
 
-    /** Enable the lock: prompt once, seal the current session file. */
+    /** Enable the lock: prompt once, seal the whole account store. */
     public static void enable(final Activity act, final Callback cb) {
         try {
             if (!FpnSession.exists(act)) { cb.onError("Sign in first."); return; }
+            FpnSession.ensureMigrated(act);
             final SecretKey key = key(true);
             final Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
             cipher.init(Cipher.ENCRYPT_MODE, key);
             authenticate(act, cipher, cb, () -> {
                 try {
-                    byte[] plain = readAll(FpnSession.file(act));
+                    byte[] plain = FpnSession.storeBundle(act).toString()
+                            .getBytes(StandardCharsets.UTF_8);
                     byte[] ct = cipher.doFinal(plain);
                     byte[] iv = cipher.getIV();
                     File enc = encFile(act);
@@ -150,12 +167,13 @@ public final class BiometricLock {
                         o.write(iv);
                         o.write(ct);
                     }
-                    FpnSession.file(act).delete();
+                    FpnSession.deletePlainStore(act);
+                    legacyEncFile(act).delete();
                     act.getSharedPreferences("fpn", Context.MODE_PRIVATE).edit()
                             .putBoolean("biolock", true).apply();
                     cb.onSuccess();
                 } catch (Exception e) {
-                    cb.onError("Could not seal the session: " + e.getMessage());
+                    cb.onError("Could not seal the accounts: " + e.getMessage());
                 }
             });
         } catch (Exception e) {
@@ -163,11 +181,12 @@ public final class BiometricLock {
         }
     }
 
-    /** Unseal the session (used before Connect while the lock is on). */
+    /** Unseal the store (used before Connect while the lock is on). */
     public static void unlock(final Activity act, final Callback cb) {
         try {
             if (!isSealed(act)) { cb.onSuccess(); return; }
-            byte[] blob = readAll(encFile(act));
+            final boolean legacy = !encFile(act).exists() && legacyEncFile(act).exists();
+            byte[] blob = readAll(legacy ? legacyEncFile(act) : encFile(act));
             int ivLen = blob[0] & 0xff;
             byte[] iv = new byte[ivLen];
             System.arraycopy(blob, 1, iv, 0, ivLen);
@@ -180,12 +199,24 @@ public final class BiometricLock {
             authenticate(act, cipher, cb, () -> {
                 try {
                     byte[] plain = cipher.doFinal(ct);
-                    try (FileOutputStream o = act.openFileOutput("session.json", Context.MODE_PRIVATE)) {
-                        o.write(plain);
+                    if (legacy) {
+                        // Pre-multi-account blob: a raw session.json.
+                        // Restore it, migrate it into the store, and
+                        // drop the legacy sealed form (the next seal
+                        // uses the store format).
+                        try (FileOutputStream o = act.openFileOutput(
+                                "session.json", Context.MODE_PRIVATE)) {
+                            o.write(plain);
+                        }
+                        legacyEncFile(act).delete();
+                        FpnSession.ensureMigrated(act);
+                    } else {
+                        FpnSession.restoreStore(act, new org.json.JSONObject(
+                                new String(plain, StandardCharsets.UTF_8)));
                     }
                     cb.onSuccess();
                 } catch (Exception e) {
-                    cb.onError("Could not unlock the session: " + e.getMessage());
+                    cb.onError("Could not unlock the accounts: " + e.getMessage());
                 }
             });
         } catch (Exception e) {
@@ -198,6 +229,7 @@ public final class BiometricLock {
         Runnable off = () -> {
             try {
                 encFile(act).delete();
+                legacyEncFile(act).delete();
                 KeyStore ks = KeyStore.getInstance("AndroidKeyStore");
                 ks.load(null);
                 if (ks.containsAlias(ALIAS)) ks.deleteEntry(ALIAS);

@@ -161,7 +161,15 @@ public class FpnEngine {
         upstream = up;
         currentPass(); // warm the pass so auth errors surface at startup
         proxyServer = new ServerSocket(PORT, 50, InetAddress.getByName("127.0.0.1"));
-        ctrlServer = new ServerSocket(CTRL_PORT, 50, InetAddress.getByName("127.0.0.1"));
+        try {
+            ctrlServer = new ServerSocket(CTRL_PORT, 50, InetAddress.getByName("127.0.0.1"));
+        } catch (Exception e) {
+            // Never leak a half-bound engine: if the control socket
+            // cannot bind, release the proxy socket before failing.
+            try { proxyServer.close(); } catch (Exception ignored) {}
+            proxyServer = null;
+            throw e;
+        }
         running = true;
         new Thread(this::acceptLoop, "fpn-proxy").start();
         new Thread(this::ctrlLoop, "fpn-ctrl").start();

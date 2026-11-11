@@ -4,6 +4,59 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [4.3.0]
+
+### Added — multiple accounts (Fix Q)
+- Sign in with several of your own Mozilla accounts and switch
+  between them. Each account lives in its own file under
+  `files/accounts/<uid>.json`; the prefs hold only which one is
+  active. Sign-in (native and WebView) now ADDS the account to the
+  store — signing in again with an already-stored account refreshes
+  that entry instead of overwriting the others.
+- The account button opens the account list: tap to switch (a
+  running tunnel restarts on the new account and fetches a fresh,
+  per-account proxy pass), "Add account" signs another one in, and
+  "Remove…" deletes one from this device after a confirmation.
+  Removing the active account moves you to a remaining account, or
+  to a clean signed-out state when none remain.
+- Migration is copy-only and one-time: your existing session.json
+  becomes account #1 (a `session.json.bak-v420` backup is written
+  first, the original stays in place, and session.json remains as a
+  live mirror of the active account for older readers).
+- Usage counters are now per-account — the main screen shows the
+  active account's email and its own today / all-time totals.
+  (Every account's plan still reads Unlimited: Mozilla's API has no
+  per-account data cap, and switching accounts does not pool or
+  extend any quota — there is none.)
+- The optional biometric lock now seals the WHOLE account store
+  (one encrypted bundle) instead of a single session file; the old
+  single-session sealed form still unlocks and migrates forward.
+
+## [4.2.1]
+
+### Fixed — the Doctor could wedge every later connect (EADDRINUSE)
+- ConnectionDoctor started a diagnostic engine that was not the
+  service's engine and, on the health-OK and repair paths, never
+  stopped it. The leaked engine held the proxy/control ports
+  (127.0.0.1:11080/11081) for the life of the process, so the next
+  Connect — and every one after — failed with `bind failed:
+  EADDRINUSE`, the tunnel stayed down, and the Doctor misreported
+  the collision as E3/E7. Reproduced live in 4.2.0 QA (a manual
+  diagnosis while disconnected, then Connect). The Doctor now
+  releases its diagnostic engine before any service-level tunnel
+  start and unconditionally when a run ends.
+- FpnEngine.start() no longer leaks the proxy socket when the
+  control-socket bind fails (half-bound engine).
+- FpnVpnService.tunnelOn() is serialized (Doctor R5, the watchdog
+  and the UI can all request a start) and retries the engine bind
+  once after a short wait instead of failing the connect outright.
+
+### Changed
+- Minimum Android version lowered to 7.1 (API 25) — verified on a
+  Galaxy A3 (2015, LineageOS 14.1): install, launch, sign-in screen
+  and the Doctor's E2 path all work. All API 26+ call sites in the
+  codebase are version-guarded.
+
 ## [4.2.0]
 
 ### Fixed — the 502 disconnect (CONNECT-health failover)
