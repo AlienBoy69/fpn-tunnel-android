@@ -40,6 +40,7 @@ import java.util.List;
 public class MainActivity extends Activity {
     private TextView statusDot, statusText, exitInfo;
     private Button connectBtn, acctBtn;
+    private android.view.View glow;
     private final Handler ui = new Handler(Looper.getMainLooper());
     private volatile boolean connected = false;
     private volatile boolean connecting = false;
@@ -85,12 +86,15 @@ public class MainActivity extends Activity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        requestWindowFeature(android.view.Window.FEATURE_NO_TITLE);
         setContentView(R.layout.activity_main);
+        getWindow().setStatusBarColor(Color.parseColor("#0A1122"));
         statusDot = findViewById(R.id.statusDot);
         statusText = findViewById(R.id.statusText);
         exitInfo = findViewById(R.id.exitInfo);
         connectBtn = findViewById(R.id.connectBtn);
         acctBtn = findViewById(R.id.acctBtn);
+        glow = findViewById(R.id.glowView);
 
         acctBtn.setOnClickListener(v -> {
             Intent si = new Intent(this, SignInActivity.class);
@@ -206,18 +210,20 @@ public class MainActivity extends Activity {
 
     private void setStateUi(boolean on, boolean busy, String cc, int passSec) {
         if (busy) {
-            statusDot.setTextColor(Color.parseColor("#FF7139"));
+            statusDot.setTextColor(Color.parseColor("#FFB020"));
             statusText.setText("Connecting…");
             connectBtn.setText("Cancel");
+            if (glow != null) glow.setBackgroundResource(R.drawable.glow_off);
             connectBtn.setBackgroundResource(R.drawable.circle_off);
             exitInfo.setText("Exit: —");
             return;
         }
         if (on) {
-            statusDot.setTextColor(Color.parseColor("#3DDC84"));
+            statusDot.setTextColor(Color.parseColor("#34D399"));
             statusText.setText("Connected · " + ("AUTO".equals(reqCountry) ? "⚡ → " : "")
                     + flag(cc) + countryName(cc));
             connectBtn.setText("Disconnect");
+            if (glow != null) glow.setBackgroundResource(R.drawable.glow_on);
             connectBtn.setBackgroundResource(R.drawable.circle_on);
             StringBuilder sb = new StringBuilder();
             if (exitIp != null) {
@@ -233,9 +239,10 @@ public class MainActivity extends Activity {
                     .append(":").append(String.format("%02d", passSec % 60));
             exitInfo.setText(sb.toString());
         } else {
-            statusDot.setTextColor(Color.parseColor("#5B6B7B"));
+            statusDot.setTextColor(Color.parseColor("#64748B"));
             statusText.setText("Disconnected");
             connectBtn.setText("Connect");
+            if (glow != null) glow.setBackgroundResource(R.drawable.glow_off);
             connectBtn.setBackgroundResource(R.drawable.circle_off);
             exitInfo.setText("Exit: —");
         }

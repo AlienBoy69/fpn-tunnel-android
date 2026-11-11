@@ -2,43 +2,54 @@
 <ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="#0D1117"
+    android:background="@drawable/bg_main"
     android:fillViewport="true">
 
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="vertical"
-        android:padding="24dp">
+        android:padding="26dp">
 
         <TextView
-            android:layout_width="wrap_content"
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
+            android:gravity="center"
+            android:letterSpacing="0.03"
             android:text="FPN Tunnel"
             android:textColor="#FFFFFF"
-            android:textSize="28sp"
+            android:textSize="30sp"
             android:textStyle="bold" />
 
         <TextView
-            android:layout_width="wrap_content"
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="2dp"
+            android:layout_marginTop="3dp"
+            android:gravity="center"
             android:text="Firefox Private Network"
-            android:textColor="#8B98A5"
+            android:textColor="#93A5CC"
             android:textSize="13sp" />
+
+        <View
+            android:layout_width="46dp"
+            android:layout_height="4dp"
+            android:layout_gravity="center_horizontal"
+            android:layout_marginTop="12dp"
+            android:background="@drawable/accent_bar" />
 
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="24dp"
+            android:layout_marginTop="26dp"
             android:background="@drawable/card_bg"
+            android:elevation="6dp"
             android:orientation="vertical"
-            android:padding="20dp">
+            android:padding="22dp">
 
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:gravity="center_vertical"
+                android:gravity="center"
                 android:orientation="horizontal">
 
                 <TextView
@@ -46,8 +57,8 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:text="●"
-                    android:textColor="#5B6B7B"
-                    android:textSize="14sp" />
+                    android:textColor="#64748B"
+                    android:textSize="13sp" />
 
                 <TextView
                     android:id="@+id/statusText"
@@ -55,68 +66,84 @@
                     android:layout_height="wrap_content"
                     android:layout_marginStart="8dp"
                     android:text="Disconnected"
-                    android:textColor="#E6EDF3"
+                    android:textColor="#EAF1FF"
                     android:textSize="16sp"
                     android:textStyle="bold" />
             </LinearLayout>
 
-            <Button
-                android:id="@+id/connectBtn"
-                android:layout_width="148dp"
-                android:layout_height="148dp"
+            <FrameLayout
+                android:layout_width="196dp"
+                android:layout_height="196dp"
                 android:layout_gravity="center_horizontal"
-                android:layout_marginTop="22dp"
-                android:background="@drawable/circle_off"
-                android:text="Connect"
-                android:textColor="#FFFFFF"
-                android:textSize="17sp"
-                android:textStyle="bold" />
+                android:layout_marginTop="18dp">
+
+                <View
+                    android:id="@+id/glowView"
+                    android:layout_width="196dp"
+                    android:layout_height="196dp"
+                    android:background="@drawable/glow_off" />
+
+                <Button
+                    android:id="@+id/connectBtn"
+                    android:layout_width="150dp"
+                    android:layout_height="150dp"
+                    android:layout_gravity="center"
+                    android:background="@drawable/circle_off"
+                    android:elevation="8dp"
+                    android:text="Connect"
+                    android:textColor="#FFFFFF"
+                    android:textSize="17sp"
+                    android:textStyle="bold" />
+            </FrameLayout>
 
             <TextView
                 android:id="@+id/exitInfo"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="18dp"
+                android:layout_marginTop="14dp"
                 android:gravity="center"
                 android:text="Exit: —"
-                android:textColor="#8B98A5"
+                android:textColor="#9FB2D8"
                 android:textSize="13sp" />
         </LinearLayout>
 
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginTop="24dp"
-            android:text="Location"
-            android:textColor="#E6EDF3"
-            android:textSize="15sp"
+            android:layout_marginTop="26dp"
+            android:letterSpacing="0.18"
+            android:text="LOCATION"
+            android:textColor="#8FA3CC"
+            android:textSize="12sp"
             android:textStyle="bold" />
 
         <Spinner
             android:id="@+id/countrySpinner"
             android:layout_width="match_parent"
-            android:layout_height="52dp"
-            android:layout_marginTop="8dp"
+            android:layout_height="54dp"
+            android:layout_marginTop="10dp"
             android:background="@drawable/spinner_bg"
-            android:paddingStart="12dp"
-            android:paddingEnd="12dp" />
+            android:paddingStart="14dp"
+            android:paddingEnd="14dp" />
 
         <Button
             android:id="@+id/acctBtn"
             android:layout_width="match_parent"
-            android:layout_height="52dp"
-            android:layout_marginTop="20dp"
+            android:layout_height="54dp"
+            android:layout_marginTop="22dp"
             android:background="@drawable/pill_btn"
-            android:textColor="#E6EDF3"
-            android:textSize="14sp" />
+            android:elevation="4dp"
+            android:textColor="#FFFFFF"
+            android:textSize="14sp"
+            android:textStyle="bold" />
 
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="18dp"
+            android:layout_marginTop="22dp"
             android:gravity="center"
-            android:text="v3.1 · Mozilla MASQUE · engine on-device"
-            android:textColor="#5B6B7B"
+            android:text="v3.2 · Mozilla MASQUE · engine on-device"
+            android:textColor="#5F7396"
             android:textSize="11sp" />
     </LinearLayout>
 </ScrollView>
