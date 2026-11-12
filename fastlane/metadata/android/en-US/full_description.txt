@@ -1,0 +1,19 @@
+Use the Mozilla VPN / Firefox Private Network subscription you already paid for — on any Android phone, from anywhere, including networks that filter it.
+
+FPN Tunnel is a whole-phone Firefox Private Network (Mozilla's FPN / Mozilla VPN subscription) client for Android in a single APK — no Termux, no Node, no root, no laptop. Sign in with your own Firefox account inside the app, pick an exit country (or let Auto pick for you), and the whole phone routes through Mozilla's MASQUE proxies.
+
+Unofficial. Not affiliated with Mozilla. Use it with your own paid Firefox Private Network / Mozilla VPN subscription. Mozilla can change or close the underlying service at any time.
+
+Why this exists: Mozilla sells a proxy network with MASQUE exits in 33 countries, but outside the supported regions there is no official way to use the subscription you paid for on an Android phone — the official apps are region-gated, and the desktop clients don't help a phone. FPN Tunnel is the missing client. It signs in with your own Firefox account, mints proxy passes from your own subscription, and routes the whole phone through Mozilla's own MASQUE servers. There is no middleman, no third-party server, and no account sharing — the session never leaves your device, and the app talks only to Mozilla endpoints.
+
+Built for filtered and unreliable networks:
+
+• Smart Connect (Auto by default) races real MASQUE CONNECT health dials across nearby countries and keeps the first exit that actually works.
+• Connection Doctor: if a connection fails, the app diagnoses itself — sign-in, network, proxy pass, a real health dial, and DNS sinkhole checks — then attempts repairs in order and tells you what happened in plain language, with a stable reason code (E1–E7).
+• Connect-health failover: a gateway that starts answering 5xx is quarantined and the app fails over to another country on its own.
+• Native in-app Firefox account sign-in (beta), implementing Mozilla's onepw protocol with email-code and TOTP verification. The classic WebView sign-in remains as a fallback — and is the only place "Sign in with Google" exists, because Google federation lives inside Mozilla's own web page.
+• Multiple Mozilla accounts with one-tap switching and per-account usage counters; auto-connect on app open and after boot; a Quick Settings tile; split tunneling; an optional biometric session lock; optional root-mode extras on rooted phones.
+
+Privacy: your session stays on your device — sign-in material never leaves the phone except to Mozilla's own endpoints. No ads, no analytics, no third-party trackers. Anonymous error reporting is optional, and public builds ship with the reporting endpoint unconfigured (disabled).
+
+Permissions (all of them): INTERNET, FOREGROUND_SERVICE + FOREGROUND_SERVICE_SPECIAL_USE (the VPN foreground service), REQUEST_INSTALL_PACKAGES (self-updates, signature-verified, downloaded only from this repo), RECEIVE_BOOT_COMPLETED (auto-reconnect after reboot, only if you were connected), USE_BIOMETRIC (the optional session lock).

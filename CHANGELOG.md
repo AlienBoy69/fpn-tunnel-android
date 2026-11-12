@@ -4,6 +4,35 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [4.3.1]
+
+### Fixed — the UI could show the wrong connection state
+- The main screen and the Quick Settings tile read connection state
+  from the engine's loopback status API, which only proves an engine
+  process exists — not that a tunnel is up. That source could show
+  "Connected" with no tunnel at all (the Connection Doctor's
+  diagnostic engine binds the same ports and answers the same status
+  calls) or "Disconnected" on a live tunnel when a status fetch
+  timed out. `FpnVpnService` is now the single source of truth: it
+  publishes every transition (a package-scoped broadcast, a
+  preferences mirror, and a poke to the tile), and the connect
+  button, the status label, the fox animation and the tile all
+  render from that one state.
+- Reopening the app while connected restarted the tunnel (the
+  activity's auto-connect fired unconditionally). Auto-connect now
+  only fires from a genuinely off state, and the first frame renders
+  the service's actual state instead of the layout defaults.
+- Verified on a real device with a full transition matrix — connect
+  and disconnect button, QS tile both ways, process kill + reopen
+  while connected, Doctor while disconnected — against `tun0` as
+  ground truth; the reported contradiction (a Doctor dialog saying
+  "Result: CONNECTED" over a main card reading "Disconnected") no
+  longer occurs.
+- Live-tested on Mokhaberat (TCI) home Wi-Fi and Irancell LTE.
+- Carries the 4.2.1 fix: running the Connection Doctor can no longer
+  wedge later connects with EADDRINUSE — the diagnostic engine is
+  released before any tunnel start.
+
 ## [4.3.0]
 
 ### Added — multiple accounts (Fix Q)

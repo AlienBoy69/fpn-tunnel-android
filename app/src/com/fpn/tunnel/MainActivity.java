@@ -58,6 +58,17 @@ public class MainActivity extends Activity {
     private volatile long connectStartMs = 0;
     private volatile boolean connectFailed = false;
     private volatile long connectedSince = 0;
+    private volatile int lastPassSec = -1;
+    // State-sync fix: the fox/label/button render from the SERVICE's
+    // published tunnel state (FpnVpnService.uiState), pushed live via
+    // this receiver and re-read on every poll tick — never from the
+    // engine's status API, which only proves an engine process exists.
+    private final android.content.BroadcastReceiver stateRx =
+            new android.content.BroadcastReceiver() {
+                @Override public void onReceive(android.content.Context c, Intent i) {
+                    renderServiceState();
+                }
+            };
     // Fix L: live usage sampling for the ~2 s smoothed rate.
     private volatile long sessUp = -1, sessDown = -1;
     private long lastSampleUp = -1, lastSampleDown = -1, lastSampleMs = 0;
@@ -286,13 +297,20 @@ public class MainActivity extends Activity {
             prefs.edit().putBoolean("faHintSeen", true).apply();
         }
 
+        // First frame renders from the service's actual state, not
+        // from the layout defaults — opening the app on a live tunnel
+        // must say Connected immediately.
+        renderServiceState();
         // Fix B: cold start — no session goes straight to sign-in; a
         // session the user left connected reconnects with no tap.
+        // Only from a genuinely OFF service: if the tunnel is already
+        // up (or starting), a redundant start would bounce it.
         if (savedInstanceState == null) {
             if (!FpnSession.exists(this) && !BiometricLock.isSealed(this)) {
                 Intent si = new Intent(this, SignInActivity.class);
                 startActivityForResult(si, 2);
-            } else if (prefs.getBoolean("wasConnected", false)) {
+            } else if (prefs.getBoolean("wasConnected", false)
+                    && FpnVpnService.uiState() == FpnVpnService.ST_OFF) {
                 ui.postDelayed(this::attemptConnect, 800);
             }
         }
@@ -338,8 +356,58 @@ public class MainActivity extends Activity {
         });
     }
 
+    /**
+     * Render the status dot, label, button and fox from the SERVICE's
+     * tunnel state — the single source of truth. Data details (exit,
+     * server, pass countdown) layer on top via the poll when ON.
+     */
+    private void renderServiceState() {
+        int s = FpnVpnService.uiState();
+        if (s == FpnVpnService.ST_ON) {
+            connected = true; connecting = false; connectFailed = false;
+            if (connectedSince == 0) connectedSince = FpnVpnService.uiStateMs();
+            if (connCountry != null) {
+                setStateUi(true, false, connCountry, lastPassSec);
+            } else {
+                statusDot.setTextColor(Color.parseColor("#34D399"));
+                statusText.setText("Connected");
+                connectBtn.setText("Disconnect");
+                if (orb != null) orb.setState(OrbView.STATE_ON);
+                exitInfo.setText("Exit: checking…");
+            }
+        } else if (s == FpnVpnService.ST_CONNECTING) {
+            connected = false; connecting = true;
+            if (connectStartMs == 0) connectStartMs = FpnVpnService.uiStateMs();
+            setStateUi(false, true, null, -1);
+        } else {
+            boolean wasConnecting = connecting;
+            connected = false; connecting = false; connectedSince = 0;
+            setStateUi(false, false, null, -1);
+            if (wasConnecting && !connectFailed) {
+                // The service fell back to OFF out of a connect attempt:
+                // it already queued its own automatic diagnosis.
+                connectFailed = true;
+                statusText.setText("Connection failed — diagnosing…");
+                diagBtn.setText("⚠  Send diagnostics — help improve FPN Tunnel");
+                diagBtn.setTextColor(Color.parseColor("#FFB020"));
+                final long before = doctorReportFile().exists()
+                        ? doctorReportFile().lastModified() : 0;
+                waitForDoctorReport(before);
+            }
+        }
+        updateUsageUi();
+    }
+
     /** Connect path shared by the button and Fix B auto-connect. */
     private void attemptConnect() {
+        // Never issue a fresh start over a live (or starting) tunnel:
+        // the service's tunnelOn tears down before it rebuilds, so a
+        // redundant start visibly bounces a healthy connection.
+        int ss = FpnVpnService.uiState();
+        if (ss == FpnVpnService.ST_ON || ss == FpnVpnService.ST_CONNECTING) {
+            renderServiceState();
+            return;
+        }
         if (connected || connecting) return;
         if (BiometricLock.isSealed(this)) {
             unlockThen(this::attemptConnect);
@@ -527,6 +595,16 @@ public class MainActivity extends Activity {
         super.onResume();
         if (acctBtn != null) refreshAccount();
         if (orb != null) orb.startAnim(); // Fix O: animate only while visible
+        // Live state pushes from the service while foregrounded…
+        android.content.IntentFilter sf =
+                new android.content.IntentFilter(FpnVpnService.ACTION_STATE);
+        if (android.os.Build.VERSION.SDK_INT >= 33)
+            registerReceiver(stateRx, sf, android.content.Context.RECEIVER_NOT_EXPORTED);
+        else
+            registerReceiver(stateRx, sf);
+        // …and an immediate re-read, in case a transition (tile, boot,
+        // Doctor, watchdog) happened while this screen was away.
+        renderServiceState();
         polling = true;
         ui.post(pollTask);
         // A doctor run that finished while the user was away still
@@ -542,6 +620,7 @@ public class MainActivity extends Activity {
     protected void onPause() {
         super.onPause();
         if (orb != null) orb.stopAnim();
+        try { unregisterReceiver(stateRx); } catch (Exception ignored) {}
         polling = false;
         ui.removeCallbacks(pollTask);
     }
@@ -589,61 +668,50 @@ public class MainActivity extends Activity {
     }
 
     private void pollOnce() {
+        // State first, from the service — synchronously, every tick,
+        // so tile/boot/Doctor/watchdog transitions are reflected even
+        // if the data fetch below is slow or fails outright.
+        ui.post(this::renderServiceState);
+        if (FpnVpnService.uiState() != FpnVpnService.ST_ON) {
+            if (FpnVpnService.uiState() == FpnVpnService.ST_OFF) {
+                connCountry = null; exitIp = null; exitLoc = null;
+                sessUp = -1; sessDown = -1; lastSampleMs = 0; smoothedRate = 0;
+            }
+            return;
+        }
+        // ON: the engine's status API is a DATA source only (exit
+        // country, server, pass countdown, byte counters). Its failure
+        // must never flip the displayed state — the service owns that.
         new Thread(() -> {
             JSONObject st = fetchStatus();
-            if (st != null) {
-                String cc = st.optString("country", "");
-                int pass = st.optInt("passExpiresInSec", -1);
-                reqCountry = st.optString("requestedCountry", cc);
-                srvName = st.optString("server", null);
-                srvRtt = st.optLong("rttMs", -1);
-                sessUp = st.optLong("bytesUp", -1);
-                sessDown = st.optLong("bytesDown", -1);
-                long now = System.currentTimeMillis();
-                if (sessUp >= 0 && lastSampleMs > 0 && now > lastSampleMs) {
-                    double instant = (double) ((sessUp - lastSampleUp)
-                            + (sessDown - lastSampleDown)) * 1000.0 / (now - lastSampleMs);
-                    if (instant >= 0)
-                        smoothedRate = smoothedRate == 0 ? instant
-                                : 0.5 * smoothedRate + 0.5 * instant;
-                }
-                if (sessUp >= 0) {
-                    lastSampleUp = sessUp; lastSampleDown = sessDown; lastSampleMs = now;
-                }
-                boolean was = connected;
-                connected = true; connecting = false; connCountry = cc;
-                connectFailed = false;
-                if (connectedSince == 0) connectedSince = System.currentTimeMillis();
-                ui.post(() -> { setStateUi(true, false, cc, pass); updateUsageUi(); });
-                if (!was || exitIp == null) fetchExitInfo();
-            } else {
-                boolean was = connected;
-                connected = false; connCountry = null; exitIp = null; exitLoc = null;
-                connectedSince = 0;
-                sessUp = -1; sessDown = -1; lastSampleMs = 0; smoothedRate = 0;
-                if (connecting && connectStartMs > 0
-                        && System.currentTimeMillis() - connectStartMs > 15000 && !connectFailed) {
-                    connectFailed = true;
-                    connecting = false;
-                    // Fix G: ~15 s without a tunnel — automatic diagnosis.
-                    final long before = doctorReportFile().exists()
-                            ? doctorReportFile().lastModified() : 0;
-                    ui.post(() -> {
-                        setStateUi(false, false, null, -1);
-                        statusText.setText("Connection failed — diagnosing…");
-                        diagBtn.setText("⚠  Send diagnostics — help improve FPN Tunnel");
-                        diagBtn.setTextColor(Color.parseColor("#FFB020"));
-                        try {
-                            startService(new Intent(MainActivity.this, FpnVpnService.class)
-                                    .setAction("diagnose"));
-                        } catch (Exception ignored) {}
-                        waitForDoctorReport(before);
-                        updateUsageUi();
-                    });
-                } else if (was || !connecting) {
-                    ui.post(() -> { setStateUi(false, false, null, -1); updateUsageUi(); });
-                }
+            if (st == null) return;
+            String cc = st.optString("country", "");
+            int pass = st.optInt("passExpiresInSec", -1);
+            reqCountry = st.optString("requestedCountry", cc);
+            srvName = st.optString("server", null);
+            srvRtt = st.optLong("rttMs", -1);
+            sessUp = st.optLong("bytesUp", -1);
+            sessDown = st.optLong("bytesDown", -1);
+            long now = System.currentTimeMillis();
+            if (sessUp >= 0 && lastSampleMs > 0 && now > lastSampleMs) {
+                double instant = (double) ((sessUp - lastSampleUp)
+                        + (sessDown - lastSampleDown)) * 1000.0 / (now - lastSampleMs);
+                if (instant >= 0)
+                    smoothedRate = smoothedRate == 0 ? instant
+                            : 0.5 * smoothedRate + 0.5 * instant;
             }
+            if (sessUp >= 0) {
+                lastSampleUp = sessUp; lastSampleDown = sessDown; lastSampleMs = now;
+            }
+            connCountry = cc;
+            lastPassSec = pass;
+            ui.post(() -> {
+                if (FpnVpnService.uiState() == FpnVpnService.ST_ON) {
+                    setStateUi(true, false, cc, pass);
+                    updateUsageUi();
+                }
+            });
+            if (exitIp == null) fetchExitInfo();
         }).start();
     }
 

@@ -4,18 +4,14 @@ import android.content.Intent;
 import android.service.quicksettings.Tile;
 import android.service.quicksettings.TileService;
 
-import org.json.JSONObject;
-
-import java.io.BufferedReader;
-import java.io.InputStreamReader;
-import java.net.HttpURLConnection;
-import java.net.URL;
-
 /**
  * Fix C — Quick Settings tile: one tap from the notification shade
  * toggles the tunnel with the persisted country, no app open needed.
- * State comes from the engine's loopback status API, the same source
- * the main screen polls. When the VPN permission or the sign-in is
+ * State comes from FpnVpnService's published tunnel state — the same
+ * single source of truth the main screen renders (the engine's
+ * loopback status API only proves an engine exists, not a tunnel).
+ * The service also pokes onStartListening via requestListeningState
+ * on every transition. When the VPN permission or the sign-in is
  * missing, the tap opens the app instead of failing silently.
  */
 public class FpnTileService extends TileService {
@@ -30,7 +26,9 @@ public class FpnTileService extends TileService {
     public void onClick() {
         super.onClick();
         new Thread(() -> {
-            boolean up = fetchUp();
+            // CONNECTING counts as up: a tap then means "cancel",
+            // matching the main screen's button semantics.
+            boolean up = FpnVpnService.uiState() != FpnVpnService.ST_OFF;
             if (up) {
                 startService(new Intent(this, FpnVpnService.class).setAction("stop"));
                 setTileState(false);
@@ -56,7 +54,7 @@ public class FpnTileService extends TileService {
     }
 
     private void refresh() {
-        new Thread(() -> setTileState(fetchUp())).start();
+        setTileState(FpnVpnService.uiState() == FpnVpnService.ST_ON);
     }
 
     private void setTileState(boolean up) {
@@ -67,20 +65,4 @@ public class FpnTileService extends TileService {
         t.updateTile();
     }
 
-    private boolean fetchUp() {
-        try {
-            HttpURLConnection c = (HttpURLConnection) new URL(
-                    "http://127.0.0.1:11081/status").openConnection();
-            c.setConnectTimeout(1200);
-            c.setReadTimeout(1200);
-            BufferedReader br = new BufferedReader(new InputStreamReader(c.getInputStream()));
-            StringBuilder sb = new StringBuilder();
-            String line;
-            while ((line = br.readLine()) != null) sb.append(line);
-            br.close();
-            return new JSONObject(sb.toString()).has("country");
-        } catch (Exception e) {
-            return false;
-        }
-    }
 }

@@ -39,6 +39,37 @@ public class FpnVpnService extends VpnService {
     private static final String[] SKIP = {
             "com.termux", "com.fpn.tunnel", "com.facebook.aura", "com.tosan.dara.sina" };
 
+    // ── UI state: the service is the single source of truth ──────────
+    // The tunnel's real state lives HERE, never in the engine's
+    // loopback status API: an engine can be running with no tunnel at
+    // all (the ConnectionDoctor's diagnostic engine binds the same
+    // ports and answers /status), and the tunnel can be up while a
+    // status fetch times out. MainActivity and the QS tile run in this
+    // same process and read these statics; every transition is also
+    // broadcast, mirrored to prefs, and pushed to the tile.
+    public static final int ST_OFF = 0;
+    public static final int ST_CONNECTING = 1;
+    public static final int ST_ON = 2;
+    public static final String ACTION_STATE = "com.fpn.tunnel.STATE_CHANGED";
+    private static volatile int uiState = ST_OFF;
+    private static volatile long uiStateMs = 0;
+
+    public static int uiState() { return uiState; }
+    public static long uiStateMs() { return uiStateMs; }
+
+    /** Record + publish a tunnel-state transition. */
+    void publishState(int s) {
+        uiState = s;
+        uiStateMs = System.currentTimeMillis();
+        try {
+            getSharedPreferences("fpn", MODE_PRIVATE).edit()
+                    .putInt("vpnState", s).putLong("vpnStateMs", uiStateMs).apply();
+            sendBroadcast(new Intent(ACTION_STATE).setPackage(getPackageName()));
+            android.service.quicksettings.TileService.requestListeningState(this,
+                    new android.content.ComponentName(this, FpnTileService.class));
+        } catch (Exception ignored) {}
+    }
+
     private ParcelFileDescriptor tun;
     private FpnEngine engine;
     private volatile boolean watchdogOn;
@@ -151,6 +182,7 @@ public class FpnVpnService extends VpnService {
         if (intent != null && "stop".equals(intent.getAction())) {
             setWasConnected(false);
             tunnelOff();
+            publishState(ST_OFF);
             stopForeground(true);
             stopSelf();
             return START_NOT_STICKY;
@@ -233,6 +265,7 @@ public class FpnVpnService extends VpnService {
     // all ask for a tunnel start; interleaved tunnelOn calls race the
     // engine bind. One at a time.
     private synchronized void tunnelOn() {
+        publishState(ST_CONNECTING);
         try {
             lastEstablishNull = false;
             tunnelOff();
@@ -280,6 +313,7 @@ public class FpnVpnService extends VpnService {
                 lastEstablishNull = true;
                 ConnectionDoctor.writeSimpleReport(this, "E6",
                         ConnectionDoctor.reasonFor("E6"), null);
+                publishState(ST_OFF);
                 stopForeground(true); stopSelf(); return;
             }
             flog("establish OK fd=" + fd.getFd());
@@ -302,6 +336,7 @@ public class FpnVpnService extends VpnService {
             tun = fd;
             flog("tunnel up, running=" + TProxyService.TProxyIsRunning());
             setWasConnected(true);
+            publishState(ST_ON);
             // Fix L: a fresh tunnel is a fresh usage session.
             if (engine != null) engine.resetSessionCounters();
             snapUp = 0; snapDown = 0;
@@ -312,6 +347,7 @@ public class FpnVpnService extends VpnService {
         } catch (Throwable e) {
             flog("tunnel FAILED: " + e);
             ErrorReporter.reportEngineFatal(this, "tunnelOn", e);
+            publishState(ST_OFF);
             stopForeground(true);
             stopSelf();
             // Fix G: a failed connect attempt gets an automatic diagnosis
@@ -340,6 +376,7 @@ public class FpnVpnService extends VpnService {
     public void onRevoke() {
         setWasConnected(false);
         tunnelOff();
+        publishState(ST_OFF);
         stopForeground(true);
         stopSelf();
         super.onRevoke();
@@ -348,6 +385,10 @@ public class FpnVpnService extends VpnService {
     @Override
     public void onDestroy() {
         tunnelOff();
+        // The process (and with it the TUN) is going away; a sticky
+        // restart that actually rebuilds the tunnel republishes
+        // CONNECTING/ON from tunnelOn.
+        publishState(ST_OFF);
         super.onDestroy();
     }
 
@@ -373,12 +414,17 @@ public class FpnVpnService extends VpnService {
                 if (restarts >= 6) {
                     flog("watchdog: giving up after " + restarts + " restarts");
                     watchdogOn = false;
+                    // The app has abandoned the tunnel: the persisted
+                    // intent must stop claiming the user is connected.
+                    setWasConnected(false);
+                    publishState(ST_OFF);
                     stopForeground(true);
                     stopSelf();
                     return;
                 }
                 restarts++;
                 flog("watchdog: tunOk=" + tunOk + " engOk=" + engOk + " — restart #" + restarts);
+                publishState(ST_CONNECTING);
                 if (tunOk && !engOk) {
                     try {
                         restartEngineOnly();
