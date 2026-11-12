@@ -126,7 +126,7 @@ public final class BiometricLock {
 
                     @Override
                     public void onAuthenticationFailed() {
-                        cb.onError("Not recognized. Try again.");
+                        cb.onError(act.getString(R.string.bio_not_recognized));
                     }
                 };
         BiometricPrompt.CryptoObject crypto = new BiometricPrompt.CryptoObject(cipher);
@@ -136,12 +136,13 @@ public final class BiometricLock {
         // where the platform supports it (API 29+), which forbids a
         // negative button; older levels get the button instead.
         BiometricPrompt.Builder b = new BiometricPrompt.Builder(act)
-                .setTitle("Unlock FPN Tunnel")
-                .setSubtitle("Confirm it's you to use your Mozilla sign-in");
+                .setTitle(act.getString(R.string.bio_prompt_title))
+                .setSubtitle(act.getString(R.string.bio_prompt_sub));
         if (Build.VERSION.SDK_INT >= 29) {
             b.setDeviceCredentialAllowed(true);
         } else {
-            b.setNegativeButton("Cancel", act.getMainExecutor(), (d, w) -> { });
+            b.setNegativeButton(act.getString(android.R.string.cancel),
+                    act.getMainExecutor(), (d, w) -> { });
         }
         b.build().authenticate(crypto, new CancellationSignal(),
                 act.getMainExecutor(), callback);
@@ -249,7 +250,9 @@ public final class BiometricLock {
     }
 
     static String stateLabel(Context ctx) {
-        return isEnabled(ctx) ? "🔒  Biometric lock: ON — tap to turn off"
-                              : "🔓  Biometric lock: OFF — tap to turn on";
+        Context c = Lang.wrap(ctx);
+        boolean on = isEnabled(ctx);
+        return (on ? "🔒  " : "🔓  ") + c.getString(R.string.row_bio) + ": "
+                + c.getString(on ? R.string.state_on : R.string.state_off);
     }
 }

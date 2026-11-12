@@ -148,8 +148,8 @@ public class FpnVpnService extends VpnService {
                 persistUsage();
                 FpnEngine e = engine;
                 if (e == null) continue;
-                String text = "Connected · ↓ " + fmtBytes(e.sessionBytesDown())
-                        + " · ↑ " + fmtBytes(e.sessionBytesUp()) + " this session";
+                String text = Lang.wrap(this).getString(R.string.notif_session,
+                        fmtBytes(e.sessionBytesDown()), fmtBytes(e.sessionBytesUp()));
                 try {
                     getSystemService(NotificationManager.class)
                             .notify(NOTE_ID, notification(text));
@@ -203,7 +203,7 @@ public class FpnVpnService extends VpnService {
     }
 
     private Notification notification() {
-        return notification("Connected — routed via Mozilla MASQUE");
+        return notification(Lang.wrap(this).getString(R.string.notif_connected));
     }
 
     private Notification notification(String text) {
@@ -228,7 +228,8 @@ public class FpnVpnService extends VpnService {
                 .setOngoing(true)
                 .setShowWhen(false)
                 .setContentIntent(open)
-                .addAction(new Notification.Action.Builder(0, "Disconnect", stop).build())
+                .addAction(new Notification.Action.Builder(0,
+                        Lang.wrap(this).getString(R.string.notif_disconnect), stop).build())
                 .build();
     }
 
@@ -312,7 +313,7 @@ public class FpnVpnService extends VpnService {
                 flog("establish() returned null");
                 lastEstablishNull = true;
                 ConnectionDoctor.writeSimpleReport(this, "E6",
-                        ConnectionDoctor.reasonFor("E6"), null);
+                        ConnectionDoctor.reasonFor(this, "E6"), null);
                 publishState(ST_OFF);
                 stopForeground(true); stopSelf(); return;
             }

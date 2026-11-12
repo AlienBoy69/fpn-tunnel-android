@@ -61,6 +61,9 @@ public class FpnTileService extends TileService {
         Tile t = getQsTile();
         if (t == null) return;
         t.setLabel("FPN Tunnel");
+        if (android.os.Build.VERSION.SDK_INT >= 29)
+            t.setSubtitle(Lang.wrap(this).getString(
+                    up ? R.string.status_connected : R.string.status_disconnected));
         t.setState(up ? Tile.STATE_ACTIVE : Tile.STATE_INACTIVE);
         t.updateTile();
     }

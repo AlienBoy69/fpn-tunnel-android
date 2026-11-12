@@ -1,250 +1,175 @@
 <?xml version="1.0" encoding="utf-8"?>
-<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+<!-- 4.4.0: ONE fixed page — no ScrollView, by Majid's order. The
+     status card carries layout_weight so it absorbs all slack; only
+     connect essentials live here. Everything else is behind the gear
+     (Settings). Verified to fit 1080x2280 in fa and en, all states. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
+    android:orientation="vertical"
     android:background="@drawable/bg_main"
-    android:fillViewport="true">
+    android:paddingStart="20dp"
+    android:paddingEnd="20dp"
+    android:paddingTop="16dp"
+    android:paddingBottom="20dp">
 
+    <!-- header: centered title block + gear at the end -->
+    <FrameLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content">
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:gravity="center_horizontal">
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/app_title"
+                android:textColor="#EAF1FF"
+                android:textSize="27sp"
+                android:textStyle="bold" />
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="2dp"
+                android:text="@string/app_subtitle"
+                android:textColor="#8FA3CC"
+                android:textSize="13sp" />
+        </LinearLayout>
+        <TextView
+            android:id="@+id/gearBtn"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:layout_gravity="end|top"
+            android:background="@drawable/btn_ghost"
+            android:gravity="center"
+            android:text="⚙"
+            android:textColor="#B9C8E8"
+            android:textSize="22sp" />
+    </FrameLayout>
+
+    <!-- connection card: state at a glance -->
     <LinearLayout
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:layout_marginTop="18dp"
         android:orientation="vertical"
-        android:padding="26dp">
-
-        <TextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:gravity="center"
-            android:letterSpacing="0.03"
-            android:text="FPN Tunnel"
-            android:textColor="#FFFFFF"
-            android:textSize="30sp"
-            android:textStyle="bold" />
-
-        <TextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="3dp"
-            android:gravity="center"
-            android:text="Firefox Private Network"
-            android:textColor="#93A5CC"
-            android:textSize="13sp" />
-
-        <View
-            android:layout_width="46dp"
-            android:layout_height="4dp"
-            android:layout_gravity="center_horizontal"
-            android:layout_marginTop="12dp"
-            android:background="@drawable/accent_bar" />
+        android:background="@drawable/card_bg"
+        android:elevation="6dp"
+        android:paddingStart="20dp"
+        android:paddingEnd="20dp"
+        android:paddingTop="18dp"
+        android:paddingBottom="18dp">
 
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="26dp"
-            android:background="@drawable/card_bg"
-            android:elevation="6dp"
-            android:orientation="vertical"
-            android:padding="22dp">
-
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:gravity="center"
-                android:orientation="horizontal">
-
-                <TextView
-                    android:id="@+id/statusDot"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="●"
-                    android:textColor="#64748B"
-                    android:textSize="13sp" />
-
-                <TextView
-                    android:id="@+id/statusText"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_marginStart="8dp"
-                    android:text="Disconnected"
-                    android:textColor="#EAF1FF"
-                    android:textSize="16sp"
-                    android:textStyle="bold" />
-            </LinearLayout>
-
-            <FrameLayout
-                android:layout_width="196dp"
-                android:layout_height="196dp"
-                android:layout_gravity="center_horizontal"
-                android:layout_marginTop="18dp">
-
-                <com.fpn.tunnel.OrbView
-                    android:id="@+id/orbView"
-                    android:layout_width="196dp"
-                    android:layout_height="196dp" />
-
-                <Button
-                    android:id="@+id/connectBtn"
-                    android:layout_width="150dp"
-                    android:layout_height="150dp"
-                    android:layout_gravity="center"
-                    android:background="@null"
-                    android:elevation="8dp"
-                    android:text="Connect"
-                    android:textColor="#FFFFFF"
-                    android:textSize="17sp"
-                    android:textStyle="bold" />
-            </FrameLayout>
-
+            android:gravity="center"
+            android:orientation="horizontal">
             <TextView
-                android:id="@+id/exitInfo"
-                android:layout_width="match_parent"
+                android:id="@+id/statusDot"
+                android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="14dp"
-                android:gravity="center"
-                android:text="Exit: —"
-                android:textColor="#9FB2D8"
+                android:text="●"
+                android:textColor="#64748B"
                 android:textSize="13sp" />
-
             <TextView
-                android:id="@+id/usageInfo"
-                android:layout_width="match_parent"
+                android:id="@+id/statusText"
+                android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="8dp"
+                android:layout_marginStart="8dp"
                 android:gravity="center"
-                android:text="Plan: Unlimited"
-                android:textColor="#9FB2D8"
-                android:textSize="12sp" />
-
-            <TextView
-                android:id="@+id/reportNotice"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="8dp"
-                android:gravity="center"
-                android:text="Anonymous error reports are on — you can turn them off below."
-                android:textColor="#8FA3CC"
-                android:textSize="11sp"
-                android:visibility="gone" />
-
-            <TextView
-                android:id="@+id/faHint"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="10dp"
-                android:gravity="center"
-                android:textColor="#FFB020"
-                android:textSize="13sp"
-                android:visibility="gone" />
+                android:textColor="#DCE7FA"
+                android:textSize="17sp"
+                android:textStyle="bold" />
         </LinearLayout>
 
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1" />
+
+        <!-- hero: the Design 2 fox (OrbView) — it only ever moves
+             by gentle transforms of the same still, per Majid's
+             word; the fox itself never changes. -->
+        <com.fpn.tunnel.OrbView
+            android:id="@+id/orbView"
+            android:layout_width="190dp"
+            android:layout_height="190dp"
+            android:layout_gravity="center_horizontal" />
+
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1" />
+
         <TextView
-            android:layout_width="wrap_content"
+            android:id="@+id/exitInfo"
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="26dp"
-            android:letterSpacing="0.18"
-            android:text="LOCATION"
+            android:gravity="center"
+            android:singleLine="true"
+            android:ellipsize="end"
             android:textColor="#8FA3CC"
-            android:textSize="12sp"
-            android:textStyle="bold" />
+            android:textSize="12.5sp" />
 
-        <Spinner
-            android:id="@+id/countrySpinner"
+        <TextView
+            android:id="@+id/faHint"
             android:layout_width="match_parent"
-            android:layout_height="54dp"
-            android:layout_marginTop="10dp"
-            android:background="@drawable/spinner_bg"
-            android:paddingStart="14dp"
-            android:paddingEnd="14dp" />
-
-        <Button
-            android:id="@+id/acctBtn"
-            android:layout_width="match_parent"
-            android:layout_height="54dp"
-            android:layout_marginTop="22dp"
-            android:background="@drawable/pill_btn"
-            android:elevation="4dp"
-            android:textColor="#FFFFFF"
-            android:textSize="14sp"
-            android:textStyle="bold" />
-
-        <Button
-            android:id="@+id/doctorBtn"
-            android:layout_width="match_parent"
-            android:layout_height="44dp"
+            android:layout_height="wrap_content"
             android:layout_marginTop="8dp"
-            android:background="@null"
-            android:text="Diagnose connection"
-            android:textColor="#8FA3CC"
-            android:textSize="13sp" />
-
-        <Button
-            android:id="@+id/howBtn"
-            android:layout_width="match_parent"
-            android:layout_height="44dp"
-            android:layout_marginTop="2dp"
-            android:background="@null"
-            android:text="How it works"
-            android:textColor="#8FA3CC"
-            android:textSize="13sp" />
-
-        <Button
-            android:id="@+id/bioBtn"
-            android:layout_width="match_parent"
-            android:layout_height="44dp"
-            android:layout_marginTop="2dp"
-            android:background="@null"
-            android:text="Biometric lock"
-            android:textColor="#8FA3CC"
-            android:textSize="13sp" />
-
-        <Button
-            android:id="@+id/rootBtn"
-            android:layout_width="match_parent"
-            android:layout_height="44dp"
-            android:layout_marginTop="2dp"
-            android:background="@null"
-            android:text="Root mode"
-            android:textColor="#8FA3CC"
-            android:textSize="13sp"
+            android:gravity="center"
+            android:text="@string/fa_hint"
+            android:textColor="#FFD479"
+            android:textSize="12.5sp"
             android:visibility="gone" />
 
         <Button
-            android:id="@+id/errBtn"
+            android:id="@+id/connectBtn"
             android:layout_width="match_parent"
-            android:layout_height="44dp"
-            android:layout_marginTop="2dp"
-            android:background="@null"
-            android:text="Anonymous error reports: ON"
-            android:textColor="#8FA3CC"
-            android:textSize="13sp" />
-
-        <Button
-            android:id="@+id/diagBtn"
-            android:layout_width="match_parent"
-            android:layout_height="44dp"
-            android:layout_marginTop="8dp"
-            android:background="@null"
-            android:text="Send diagnostics"
-            android:textColor="#8FA3CC"
-            android:textSize="13sp" />
-
-        <Button
-            android:id="@+id/updateBtn"
-            android:layout_width="match_parent"
-            android:layout_height="44dp"
-            android:layout_marginTop="2dp"
-            android:background="@null"
-            android:text="Check for updates"
-            android:textColor="#8FA3CC"
-            android:textSize="13sp" />
-
-        <TextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="14dp"
-            android:gravity="center"
-            android:text="v4.2 · Mozilla MASQUE · engine on-device"
-            android:textColor="#5F7396"
-            android:textSize="11sp" />
+            android:layout_height="58dp"
+            android:layout_marginTop="16dp"
+            android:background="@drawable/pill_btn"
+            android:textAllCaps="false"
+            android:textColor="#FFFFFF"
+            android:textSize="17sp"
+            android:textStyle="bold" />
     </LinearLayout>
-</ScrollView>
+
+    <!-- location -->
+    <TextView
+        style="@style/SectionLabel"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="18dp"
+        android:text="@string/section_location" />
+
+    <Spinner
+        android:id="@+id/countrySpinner"
+        android:layout_width="match_parent"
+        android:layout_height="56dp"
+        android:layout_marginTop="8dp"
+        android:background="@drawable/seg_wrap" />
+
+    <!-- account quick-switch -->
+    <Button
+        android:id="@+id/acctBtn"
+        android:layout_width="match_parent"
+        android:layout_height="56dp"
+        android:layout_marginTop="12dp"
+        android:background="@drawable/btn_ghost"
+        android:textAllCaps="false"
+        android:textColor="#DCE7FA"
+        android:textSize="14.5sp" />
+
+    <TextView
+        android:id="@+id/footerText"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="14dp"
+        android:gravity="center"
+        android:textColor="#5F7396"
+        android:textSize="11.5sp" />
+</LinearLayout>

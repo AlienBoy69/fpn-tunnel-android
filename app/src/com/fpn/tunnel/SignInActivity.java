@@ -83,44 +83,68 @@ public class SignInActivity extends Activity {
     }
 
     @Override
+    protected void attachBaseContext(android.content.Context base) {
+        super.attachBaseContext(Lang.wrap(base));
+    }
+
+    private LinearLayout.LayoutParams lpTop(int topDp, int heightDp) {
+        LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                heightDp > 0 ? Ui.dp(this, heightDp)
+                        : LinearLayout.LayoutParams.WRAP_CONTENT);
+        p.topMargin = Ui.dp(this, topDp);
+        return p;
+    }
+
+    @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        int pad = (int) (16 * getResources().getDisplayMetrics().density);
+        requestWindowFeature(android.view.Window.FEATURE_NO_TITLE);
+        getWindow().setStatusBarColor(0xFF0A1122);
+        int pad = Ui.dp(this, 20);
 
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setPadding(pad, pad, pad, pad);
-        root.setBackgroundColor(android.graphics.Color.parseColor("#0A1122"));
+        root.setPadding(pad, Ui.dp(this, 16), pad, pad);
+        root.setBackgroundResource(R.drawable.bg_main);
+
+        root.addView(Ui.backRow(this));
 
         TextView title = new TextView(this);
-        title.setText("Sign in to your Mozilla account");
-        title.setTextSize(18);
-        title.setTextColor(android.graphics.Color.parseColor("#EAF1FF"));
-        root.addView(title);
+        title.setText(R.string.signin_title);
+        title.setTextSize(22);
+        title.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
+        title.setTextColor(Ui.HI);
+        root.addView(title, lpTop(10, 0));
 
         TextView sub = new TextView(this);
-        sub.setText("Native sign-in (beta) — no browser needed. Your password "
-                + "goes only to Mozilla's API and is never stored or logged.");
-        sub.setTextSize(13);
-        sub.setTextColor(android.graphics.Color.parseColor("#9FB2D8"));
-        sub.setPadding(0, pad / 2, 0, pad);
-        root.addView(sub);
+        sub.setText(R.string.signin_sub);
+        sub.setTextSize(13.5f);
+        sub.setTextColor(Ui.DIM);
+        sub.setLineSpacing(0, 1.3f);
+        root.addView(sub, lpTop(8, 0));
 
+        TextView emailLabel = Ui.fieldLabel(this, R.string.label_email);
+        root.addView(emailLabel, lpTop(22, 0));
         emailEt = new EditText(this);
-        emailEt.setHint("Email");
+        Ui.styleField(this, emailEt);
+        emailEt.setHint(R.string.label_email);
         emailEt.setSingleLine(true);
         emailEt.setInputType(InputType.TYPE_CLASS_TEXT
                 | InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS);
         String savedEmail = FpnSession.email(this);
         if (savedEmail != null) emailEt.setText(savedEmail);
-        root.addView(emailEt);
+        root.addView(emailEt, lpTop(6, 0));
 
+        TextView pwLabel = Ui.fieldLabel(this, R.string.label_password);
+        root.addView(pwLabel, lpTop(16, 0));
         passwordEt = new EditText(this);
-        passwordEt.setHint("Password");
+        Ui.styleField(this, passwordEt);
+        passwordEt.setHint(R.string.label_password);
         passwordEt.setSingleLine(true);
         passwordEt.setInputType(InputType.TYPE_CLASS_TEXT
                 | InputType.TYPE_TEXT_VARIATION_PASSWORD);
-        root.addView(passwordEt);
+        root.addView(passwordEt, lpTop(6, 0));
 
         // Autofill hints let Google Password Manager (and other
         // providers) offer the saved Mozilla credential — the realistic
@@ -132,55 +156,54 @@ public class SignInActivity extends Activity {
             passwordEt.setImportantForAutofill(View.IMPORTANT_FOR_AUTOFILL_YES);
         }
 
-        signInBtn = new Button(this);
-        signInBtn.setText("Sign in");
-        root.addView(signInBtn);
+        signInBtn = Ui.primaryButton(this, R.string.btn_signin);
+        root.addView(signInBtn, lpTop(20, 56));
 
         statusTv = new TextView(this);
-        statusTv.setTextSize(13);
-        statusTv.setTextColor(android.graphics.Color.parseColor("#FFB020"));
-        statusTv.setPadding(0, pad / 2, 0, 0);
-        root.addView(statusTv);
+        statusTv.setTextSize(13.5f);
+        statusTv.setTextColor(Ui.AMBER);
+        root.addView(statusTv, lpTop(10, 0));
 
         // Verification step (email code / TOTP / recovery / unblock).
         codeBox = new LinearLayout(this);
         codeBox.setOrientation(LinearLayout.VERTICAL);
         codeBox.setVisibility(View.GONE);
-        codeBox.setPadding(0, pad, 0, 0);
         codeLabelTv = new TextView(this);
-        codeLabelTv.setTextSize(14);
-        codeLabelTv.setTextColor(android.graphics.Color.parseColor("#EAF1FF"));
-        codeBox.addView(codeLabelTv);
+        codeLabelTv.setTextSize(14.5f);
+        codeLabelTv.setTextColor(Ui.HI);
+        codeLabelTv.setLineSpacing(0, 1.3f);
+        codeBox.addView(codeLabelTv, lpTop(18, 0));
         codeEt = new EditText(this);
-        codeEt.setHint("Code");
+        Ui.styleField(this, codeEt);
+        codeEt.setHint(R.string.label_code);
         codeEt.setSingleLine(true);
-        codeBox.addView(codeEt);
-        verifyBtn = new Button(this);
-        verifyBtn.setText("Verify");
-        codeBox.addView(verifyBtn);
+        codeBox.addView(codeEt, lpTop(8, 0));
+        verifyBtn = Ui.primaryButton(this, R.string.btn_verify);
+        codeBox.addView(verifyBtn, lpTop(12, 54));
         LinearLayout codeRow = new LinearLayout(this);
         codeRow.setOrientation(LinearLayout.HORIZONTAL);
-        resendBtn = new Button(this);
-        resendBtn.setText("Resend code");
-        codeRow.addView(resendBtn);
-        recoveryBtn = new Button(this);
-        recoveryBtn.setText("Use a recovery code");
+        resendBtn = Ui.ghostButton(this, R.string.btn_resend);
+        LinearLayout.LayoutParams half = new LinearLayout.LayoutParams(
+                0, Ui.dp(this, 48), 1f);
+        codeRow.addView(resendBtn, half);
+        recoveryBtn = Ui.ghostButton(this, R.string.btn_recovery);
         recoveryBtn.setVisibility(View.GONE);
-        codeRow.addView(recoveryBtn);
-        codeBox.addView(codeRow);
+        LinearLayout.LayoutParams half2 = new LinearLayout.LayoutParams(
+                0, Ui.dp(this, 48), 1f);
+        half2.setMarginStart(Ui.dp(this, 10));
+        codeRow.addView(recoveryBtn, half2);
+        codeBox.addView(codeRow, lpTop(10, 0));
         root.addView(codeBox);
 
         TextView googleNote = new TextView(this);
-        googleNote.setText("Google sign-in works only on Mozilla's own page — "
-                + "use the web sign-in below if you signed up with Google.");
+        googleNote.setText(R.string.google_note);
         googleNote.setTextSize(12);
-        googleNote.setTextColor(android.graphics.Color.parseColor("#8FA3CC"));
-        googleNote.setPadding(0, pad, 0, 0);
-        root.addView(googleNote);
+        googleNote.setTextColor(Ui.FAINT);
+        googleNote.setLineSpacing(0, 1.3f);
+        root.addView(googleNote, lpTop(22, 0));
 
-        Button webBtn = new Button(this);
-        webBtn.setText("Use the Mozilla page instead (web sign-in)");
-        root.addView(webBtn);
+        Button webBtn = Ui.ghostButton(this, R.string.btn_web_signin);
+        root.addView(webBtn, lpTop(10, 52));
         webBtn.setOnClickListener(v -> {
             // The WebView gets its own full-screen layout: a WebView
             // inside the form's ScrollView cannot size itself.
@@ -193,6 +216,8 @@ public class SignInActivity extends Activity {
         });
 
         ScrollView scroll = new ScrollView(this);
+        scroll.setBackgroundResource(R.drawable.bg_main);
+        scroll.setFillViewport(true);
         scroll.addView(root);
         setContentView(scroll);
 
@@ -201,7 +226,7 @@ public class SignInActivity extends Activity {
         resendBtn.setOnClickListener(v -> doResend());
         recoveryBtn.setOnClickListener(v -> {
             codeMode = "recovery";
-            codeLabelTv.setText("Enter one of your 10-character recovery codes:");
+            codeLabelTv.setText(R.string.code_recovery);
             codeEt.setInputType(InputType.TYPE_CLASS_TEXT);
             codeEt.setText("");
             recoveryBtn.setVisibility(View.GONE);
@@ -221,12 +246,12 @@ public class SignInActivity extends Activity {
         final String email = emailEt.getText().toString().trim();
         final char[] pw = passwordEt.getText().toString().toCharArray();
         if (email.isEmpty() || pw.length == 0) {
-            showStatus("Enter your email and password.");
+            showStatus(getString(R.string.msg_enter_both));
             java.util.Arrays.fill(pw, '\0');
             return;
         }
         setBusy(true);
-        showStatus("Signing in…");
+        showStatus(getString(R.string.msg_signing_in));
         new Thread(() -> {
             try {
                 FxaLogin.Result r = fx().login(email, pw.clone());
@@ -242,8 +267,7 @@ public class SignInActivity extends Activity {
                     runOnUiThread(() -> {
                         setBusy(false);
                         codeMode = "unblock";
-                        codeLabelTv.setText("Sign-in was blocked for security. "
-                                + "Enter the 8-character unblock code from your email:");
+                        codeLabelTv.setText(R.string.code_unblock);
                         codeEt.setInputType(InputType.TYPE_CLASS_TEXT);
                         codeBox.setVisibility(View.VISIBLE);
                         showStatus("");
@@ -254,7 +278,7 @@ public class SignInActivity extends Activity {
                 }
             } catch (Exception e) {
                 java.util.Arrays.fill(pw, '\0');
-                showStatus("Sign-in failed: " + e.getMessage());
+                showStatus(getString(R.string.msg_signin_failed, e.getMessage()));
                 runOnUiThread(() -> setBusy(false));
             } finally {
                 java.util.Arrays.fill(pw, '\0');
@@ -277,17 +301,16 @@ public class SignInActivity extends Activity {
             resendBtn.setVisibility(View.VISIBLE);
             if ("totp-2fa".equals(method)) {
                 codeMode = "totp";
-                codeLabelTv.setText("Enter the 6-digit code from your authenticator app:");
+                codeLabelTv.setText(R.string.code_totp);
                 codeEt.setInputType(InputType.TYPE_CLASS_NUMBER);
                 recoveryBtn.setVisibility(View.VISIBLE);
             } else if ("email-otp".equals(method) || "email-2fa".equals(method)) {
                 codeMode = "otp";
-                codeLabelTv.setText("Enter the 6-digit code we emailed you:");
+                codeLabelTv.setText(R.string.code_email);
                 codeEt.setInputType(InputType.TYPE_CLASS_NUMBER);
             } else {
                 codeMode = "link";
-                codeLabelTv.setText("We emailed you a sign-in link. Tap it in "
-                        + "your mail app — this screen finishes by itself.");
+                codeLabelTv.setText(R.string.code_link);
                 codeEt.setVisibility(View.GONE);
                 verifyBtn.setVisibility(View.GONE);
                 resendBtn.setVisibility(View.GONE);
@@ -309,30 +332,30 @@ public class SignInActivity extends Activity {
                     return;
                 }
             }
-            if (alive) showStatus("Still waiting for the email link — or use the web sign-in below.");
+            if (alive) showStatus(getString(R.string.msg_waiting_link));
         }).start();
     }
 
     private void doVerify() {
         final String code = codeEt.getText().toString().trim();
         if ("unblock".equals(codeMode)) {
-            if (pendingPassword == null) { showStatus("Sign in again first."); return; }
+            if (pendingPassword == null) { showStatus(getString(R.string.msg_signin_again)); return; }
             setBusy(true);
-            showStatus("Retrying with the unblock code…");
+            showStatus(getString(R.string.msg_retry_unblock));
             new Thread(() -> {
                 try {
                     FxaLogin.Result r = fx().login(pendingEmail, pendingPassword, code);
                     handleResult(r);
                 } catch (Exception e) {
                     showStatus(e instanceof FxaLogin.FxaError
-                            ? e.getMessage() : "Sign-in failed: " + e.getMessage());
+                            ? e.getMessage() : getString(R.string.msg_signin_failed, e.getMessage()));
                     runOnUiThread(() -> setBusy(false));
                 }
             }).start();
             return;
         }
-        if (pendingResult == null) { showStatus("Sign in again first."); return; }
-        if (code.isEmpty()) { showStatus("Enter the code."); return; }
+        if (pendingResult == null) { showStatus(getString(R.string.msg_signin_again)); return; }
+        if (code.isEmpty()) { showStatus(getString(R.string.msg_enter_code)); return; }
         setBusy(true);
         final String token = pendingResult.sessionToken;
         new Thread(() -> {
@@ -345,12 +368,12 @@ public class SignInActivity extends Activity {
                     pendingResult.sessionVerified = true;
                     finishSave(pendingResult);
                 } else {
-                    showStatus("Code accepted, but the session is still unverified. Try again.");
+                    showStatus(getString(R.string.msg_code_unverified));
                     runOnUiThread(() -> setBusy(false));
                 }
             } catch (Exception e) {
                 showStatus(e instanceof FxaLogin.FxaError
-                        ? e.getMessage() : "Verification failed: " + e.getMessage());
+                        ? e.getMessage() : getString(R.string.msg_verify_failed, e.getMessage()));
                 runOnUiThread(() -> setBusy(false));
             }
         }).start();
@@ -361,10 +384,10 @@ public class SignInActivity extends Activity {
             try {
                 if ("unblock".equals(codeMode)) fx().sendUnblockCode(pendingEmail);
                 else if (pendingResult != null) fx().resendCode(pendingResult.sessionToken);
-                showStatus("A fresh code is on its way.");
+                showStatus(getString(R.string.msg_fresh_code));
             } catch (Exception e) {
                 showStatus(e instanceof FxaLogin.FxaError
-                        ? e.getMessage() : "Resend failed: " + e.getMessage());
+                        ? e.getMessage() : getString(R.string.msg_resend_failed, e.getMessage()));
             }
         }).start();
     }
@@ -379,7 +402,7 @@ public class SignInActivity extends Activity {
                     .put("verified", true);
             FpnSession.save(this, account);
         } catch (Exception e) {
-            showStatus("Signed in, but saving the session failed: " + e.getMessage());
+            showStatus(getString(R.string.msg_save_failed, e.getMessage()));
             runOnUiThread(() -> setBusy(false));
             return;
         }

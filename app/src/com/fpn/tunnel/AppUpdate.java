@@ -107,26 +107,26 @@ public class AppUpdate {
                 if (act.isFinishing()) return;
                 if (fTag == null || fTag.isEmpty()) {
                     ulog(act, "check: no result (offline?) manual=" + manual);
-                    if (manual) toast(act, "Couldn't check for updates");
+                    if (manual) toast(act, act.getString(R.string.upd_check_failed));
                     return;
                 }
                 ulog(act, "check: latest=" + fTag + " current=" + currentVersion(act));
                 if (fUrl != null && compare(fTag, currentVersion(act)) > 0) {
                     showDialog(act, fName, fUrl, fSize);
                 } else if (manual) {
-                    toast(act, "You're on the latest version (" + currentVersion(act) + ")");
+                    toast(act, act.getString(R.string.upd_latest, currentVersion(act)));
                 }
             });
         }).start();
     }
 
     private static void showDialog(final Activity act, String name, final String url, long size) {
-        String sizeTxt = size > 0 ? String.format(" (%.1f MB)", size / 1048576.0) : "";
-        new AlertDialog.Builder(act)
-                .setTitle("Update available")
-                .setMessage(name + sizeTxt + "\n\nDownload and install it now?")
-                .setPositiveButton("Update", (d, w) -> download(act, url, size))
-                .setNegativeButton("Later", null)
+        String sizeTxt = size > 0 ? act.getString(R.string.upd_size, size / 1048576.0) : "";
+        new AlertDialog.Builder(act, R.style.FpnDialog)
+                .setTitle(R.string.upd_available_title)
+                .setMessage(act.getString(R.string.upd_available_msg, name, sizeTxt))
+                .setPositiveButton(R.string.btn_update, (d, w) -> download(act, url, size))
+                .setNegativeButton(R.string.btn_later, null)
                 .show();
     }
 
@@ -155,27 +155,25 @@ public class AppUpdate {
         android.content.SharedPreferences prefs =
                 act.getSharedPreferences("fpn_update", android.content.Context.MODE_PRIVATE);
         if (!can && !prefs.getBoolean("permAsked", false)) {
-            new AlertDialog.Builder(act)
-                    .setTitle("One-time permission needed")
-                    .setMessage("Android asks you to allow FPN Tunnel to install its own "
-                            + "updates. Turn on \"Allow from this source\" on the next "
-                            + "screen, come back, and tap \"Check for updates\" again.")
-                    .setPositiveButton("Open settings", (d, w) -> {
+            new AlertDialog.Builder(act, R.style.FpnDialog)
+                    .setTitle(R.string.upd_perm_title)
+                    .setMessage(R.string.upd_perm_msg)
+                    .setPositiveButton(R.string.btn_open_settings, (d, w) -> {
                         prefs.edit().putBoolean("permAsked", true).apply();
                         try {
                             act.startActivity(new Intent(
                                     Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
                                     Uri.parse("package:" + act.getPackageName())));
                         } catch (Exception e) {
-                            toast(act, "Couldn't open settings");
+                            toast(act, act.getString(R.string.upd_cant_open_settings));
                         }
                     })
-                    .setNegativeButton("Cancel", null)
+                    .setNegativeButton(android.R.string.cancel, null)
                     .show();
             return;
         }
-        final ProgressDialog pd = new ProgressDialog(act);
-        pd.setTitle("Downloading update…");
+        final ProgressDialog pd = new ProgressDialog(act, R.style.FpnDialog);
+        pd.setTitle(R.string.upd_downloading);
         if (size > 0) {
             pd.setProgressStyle(ProgressDialog.STYLE_HORIZONTAL);
             pd.setMax(100);
@@ -216,7 +214,7 @@ public class AppUpdate {
                 if (act.isFinishing()) return;
                 if (fErr != null) {
                     ulog(act, "download failed: " + fErr);
-                    toast(act, "Download failed — try again later");
+                    toast(act, act.getString(R.string.upd_download_failed));
                 } else {
                     ulog(act, "download ok (" + out.length() + " B); installing");
                     install(act, out);
@@ -288,7 +286,7 @@ public class AppUpdate {
 
     private static void install(Activity act, File apk) {
         if (!verifyDownloadedApk(act, apk)) {
-            toast(act, "Update rejected: the downloaded file is not signed as FPN Tunnel");
+            toast(act, act.getString(R.string.upd_rejected));
             try { apk.delete(); } catch (Exception ignored) {}
             return;
         }
@@ -311,9 +309,9 @@ public class AppUpdate {
             ulog(act, "root install -> " + (ok ? "Success" : "failed: " + out));
             act.runOnUiThread(() -> {
                 if (ok) {
-                    toast(act, "Updated — restarting the app");
+                    toast(act, act.getString(R.string.upd_updated));
                 } else {
-                    toast(act, "Root install failed — using the normal installer");
+                    toast(act, act.getString(R.string.upd_root_failed));
                     installViaInstaller(act, apk);
                 }
             });
@@ -347,7 +345,7 @@ public class AppUpdate {
             ulog(act, "install session committed");
         } catch (Exception e) {
             ulog(act, "install failed: " + e.getMessage());
-            toast(act, "Install failed: " + e.getMessage());
+            toast(act, act.getString(R.string.upd_install_failed, e.getMessage()));
         }
     }
 

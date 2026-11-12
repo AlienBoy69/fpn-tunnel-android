@@ -1,0 +1,250 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Header -->
+    <string name="app_title">FPN Tunnel</string>
+    <string name="app_subtitle">شبکهٔ خصوصی فایرفاکس</string>
+
+    <!-- Settings screen -->
+    <string name="settings_title">تنظیمات</string>
+    <string name="section_language">زبان</string>
+    <string name="section_account">حساب کاربری</string>
+    <string name="section_connection">اتصال</string>
+    <string name="section_usage">مصرف داده</string>
+    <string name="section_preferences">ترجیحات</string>
+    <string name="section_app">برنامه</string>
+    <string name="bio_not_recognized">شناخته نشد؛ دوباره تلاش کنید.</string>
+
+    <!-- Connection state -->
+    <string name="status_connected">متصل</string>
+    <string name="status_connected_to">متصل · %1$s</string>
+    <string name="status_connecting">در حال اتصال…</string>
+    <string name="status_disconnected">قطع</string>
+    <string name="status_failed_diagnosing">اتصال برقرار نشد — در حال بررسی…</string>
+    <string name="btn_connect">اتصال</string>
+    <string name="btn_disconnect">قطع کردن</string>
+    <string name="btn_cancel">لغو</string>
+
+    <!-- Exit + usage readout -->
+    <string name="exit_checking">خروجی: در حال بررسی…</string>
+    <string name="exit_none">خروجی: —</string>
+    <string name="exit_line">خروجی: %1$s</string>
+    <string name="exit_at">" · %1$s"</string>
+    <string name="frag_rtt">" · %1$d میلی‌ثانیه"</string>
+    <string name="frag_pass">" · توکن %1$s"</string>
+    <string name="frag_uptime">" · مدت اتصال %1$s"</string>
+    <string name="plan_unlimited">اشتراک: نامحدود</string>
+    <string name="usage_session">↓ %1$s · ↑ %2$s در این نشست</string>
+    <string name="usage_rate">" · %1$s/ثانیه"</string>
+    <string name="usage_today">امروز: %1$s</string>
+    <string name="usage_all_time">مجموع: %1$s (این گوشی)</string>
+    <!-- Location -->
+    <string name="section_location">موقعیت</string>
+    <string name="auto_fastest">⚡ خودکار (سریع‌ترین)</string>
+
+    <!-- Language switcher -->
+    <string name="lang_name_en">English</string>
+    <string name="lang_name_fa">فارسی</string>
+
+    <!-- Account row + accounts sheet -->
+    <string name="acct_signin">ورود با فایرفاکس</string>
+    <string name="acct_locked">🔒 نشست قفل است — برای باز کردن، «اتصال» را بزنید</string>
+    <string name="acct_format">👤 %1$s%2$s</string>
+    <string name="acct_more">" (+%1$d حساب دیگر)"</string>
+    <string name="acct_hint_switch">" · برای جابه‌جایی بزنید"</string>
+    <string name="accounts_title">حساب‌ها</string>
+    <string name="chip_active">فعال</string>
+    <string name="add_account">افزودن حساب</string>
+    <string name="remove_dots">حذف…</string>
+    <string name="btn_close">بستن</string>
+    <string name="remove_title">حذف حساب</string>
+    <string name="remove_which">کدام حساب حذف شود؟</string>
+    <string name="remove_msg">%1$s از این گوشی حذف شود؟ ورود ذخیره‌شده‌اش در این گوشی پاک می‌شود؛ خود حساب آسیبی نمی‌بیند.</string>
+    <string name="btn_remove">حذف</string>
+    <string name="btn_done">تمام</string>
+
+    <!-- Settings rows -->
+    <string name="row_doctor">بررسی اتصال</string>
+    <string name="row_how">نحوهٔ کارکرد</string>
+    <string name="row_bio">قفل بیومتریک</string>
+    <string name="row_root">حالت روت</string>
+    <string name="row_err">گزارش خطای ناشناس</string>
+    <string name="row_diag">ارسال گزارش تشخیصی</string>
+    <string name="row_diag_alert">⚠ ارسال گزارش تشخیصی — برای بهتر شدن FPN Tunnel</string>
+    <string name="row_update">بررسی به‌روزرسانی</string>
+    <string name="state_on">روشن</string>
+    <string name="state_off">خاموش</string>
+    <string name="value_sep">" · %1$s"</string>
+    <string name="report_notice">گزارش خطای ناشناس روشن است — از پایین صفحه می‌توانید خاموشش کنید.</string>
+    <string name="fa_hint">💡 برای اتصال راحت‌تر، حالت «خودکار ⚡» را انتخاب کنید؛ برنامه خودش سالم‌ترین سرور را پیدا می‌کند.</string>
+    <string name="footer">نسخهٔ %1$s · Mozilla MASQUE</string>
+
+    <!-- Main-screen transient messages -->
+    <string name="signin_first">اول با فایرفاکس وارد شوید</string>
+    <string name="signin_first_bio">اول وارد شوید، بعد قفل بیومتریک را روشن کنید</string>
+    <string name="start_failed">شروع ناموفق بود: %1$s</string>
+    <string name="diagnosing">در حال بررسی اتصال…</string>
+    <string name="diag_slow">بررسی طول کشید — کمی دیگر دوباره نگاه کنید</string>
+    <string name="diag_cant_start">بررسی شروع نشد: %1$s</string>
+    <string name="checking_root">در حال بررسی روت (شاید Magisk اجازه بخواهد)…</string>
+    <string name="root_unavailable">روت برای این برنامه در دسترس نیست</string>
+    <string name="battery_fail">تغییر فهرست سفید باتری ناموفق بود</string>
+
+    <!-- Doctor -->
+    <string name="doctor_title">بررسی اتصال</string>
+    <string name="verdict_connected">✓ متصل شد</string>
+    <string name="verdict_failed">اتصال برقرار نشد</string>
+    <string name="btn_ok">باشه</string>
+    <string name="report_title">FPN Tunnel — گزارش بررسی اتصال</string>
+    <string name="result_connected">نتیجه: متصل شد</string>
+    <string name="result_connected_fixed">" — با یک مرحلهٔ تعمیر درست شد"</string>
+    <string name="result_failed">نتیجه: اتصال برقرار نشد</string>
+    <string name="reason_line">دلیل (%1$s): %2$s</string>
+    <string name="repairs_tried">تعمیرهای انجام‌شده:</string>
+    <string name="checks_label">بررسی‌ها:</string>
+    <string name="report_advice">اگر این مشکل تکرار شد، «ارسال گزارش تشخیصی» را بزنید و کد %1$s را بگویید.</string>
+    <string name="reason_e1">این گوشی اینترنت ندارد. وای‌فای یا دادهٔ همراه را بررسی کنید و دوباره تلاش کنید.</string>
+    <string name="reason_e2">ورود موزیلا وجود ندارد یا منقضی شده است. دوباره وارد شوید.</string>
+    <string name="reason_e3">سرور خروجی در دسترس نیست — شاید شبکه‌تان آن را فیلتر کرده باشد. کشور دیگری یا حالت خودکار را امتحان کنید.</string>
+    <string name="reason_e4">درگاه موزیلا خطا برگرداند. برنامه به‌صورت خودکار سرور را عوض کرد.</string>
+    <string name="reason_e5">موزیلا توکن ورود را رد کرد. دوباره وارد شوید.</string>
+    <string name="reason_e6">اجازهٔ VPN داده نشده است. «اتصال» را بزنید و اجازهٔ VPN را تأیید کنید.</string>
+    <string name="reason_e7">خطای پیش‌بینی‌نشده‌ای رخ داد. لطفاً گزارش تشخیصی بفرستید تا بررسی کنیم.</string>
+    <string name="chk_signin_present">ورود: موجود است</string>
+    <string name="chk_signin_missing">ورود: وجود ندارد</string>
+    <string name="chk_network_up">اینترنت گوشی: برقرار</string>
+    <string name="chk_network_down">اینترنت گوشی: قطع</string>
+    <string name="chk_engine_running">موتور: در حال اجرا</string>
+    <string name="chk_engine_started">موتور: برای بررسی روشن شد</string>
+    <string name="chk_engine_start_failed">روشن شدن موتور ناموفق بود — %1$s</string>
+    <string name="chk_pass_ok">گذرنامهٔ موزیلا: سالم (%1$s)</string>
+    <string name="chk_pass_failed">گذرنامهٔ موزیلا: ناموفق — %1$s</string>
+    <string name="chk_dns">DNS: %1$s</string>
+    <string name="chk_exit_ok">سلامت خروجی: خوب — %1$s</string>
+    <string name="chk_exit_failed">سلامت خروجی: ناموفق (%1$s) — %2$s</string>
+    <string name="rep_tunnel_started">تونل VPN روشن شد — درست شد</string>
+    <string name="rep_pass_ok">گذرنامهٔ موزیلا تازه شد — درست شد</string>
+    <string name="rep_pass_no">گذرنامهٔ موزیلا تازه شد — درست نشد</string>
+    <string name="rep_pass_fail">تازه‌سازی گذرنامهٔ موزیلا ناموفق بود (%1$s)</string>
+    <string name="rep_switch_ok">سرور خروجی عوض شد%1$s — درست شد</string>
+    <string name="rep_switch_to">" به %1$s"</string>
+    <string name="rep_switch_no">تعویض سرور خروجی — درست نشد</string>
+    <string name="rep_auto_ok">به حالت خودکار (سریع‌ترین کشور سالم) برگشت — درست شد</string>
+    <string name="rep_auto_no">برگشت به حالت خودکار — درست نشد</string>
+    <string name="rep_smart_ok">اتصال هوشمند یک سرور سالم پیدا کرد (%1$s) — درست شد</string>
+    <string name="rep_smart_no">اتصال هوشمند %1$s را پیدا کرد ولی آزمایش دوباره ناموفق بود</string>
+    <string name="rep_smart_none">اتصال هوشمند: هیچ سروری از اتصال واقعی رد نشد</string>
+    <string name="rep_engine_ok">موتور اتصال از نو روشن شد — درست شد</string>
+    <string name="rep_engine_no">روشن‌کردن دوبارهٔ موتور — درست نشد</string>
+    <string name="rep_engine_fail">روشن‌کردن دوبارهٔ موتور ناموفق بود (%1$s)</string>
+    <string name="rep_service_ok">سرویس VPN از نو روشن شد — درست شد</string>
+    <string name="rep_service_perm">سرویس VPN از نو روشن شد — اجازهٔ VPN وجود ندارد</string>
+    <string name="rep_service_no">روشن‌کردن دوبارهٔ سرویس VPN — درست نشد</string>
+    <string name="leak_failed">آزمون نشت: ناموفق (%1$s)</string>
+
+    <!-- Root panel -->
+    <string name="root_title">حالت روت</string>
+    <string name="root_sw_update">به‌روزرسانی بی‌صدا (روت)</string>
+    <string name="root_sw_battery">محافظت در برابر بهینه‌سازی باتری (روت)</string>
+    <string name="root_sw_leak">آزمون نشت دکتر (روت)</string>
+    <string name="root_sw_kill">کیل‌سوئیچ هسته — به‌زودی (هنوز عرضه نشده: زنجیرهٔ فایروالِ خود برنامه ممکن است از برنامه عمر بیشتری کند و همهٔ ترافیک را ببندد)</string>
+
+    <!-- Sign-in -->
+    <string name="signin_title">ورود به حساب موزیلا</string>
+    <string name="signin_sub">ورود مستقیم (بتا) — بدون نیاز به مرورگر. رمزتان فقط به سرور موزیلا می‌رود و هیچ‌جا ذخیره یا ثبت نمی‌شود.</string>
+    <string name="label_email">ایمیل</string>
+    <string name="label_password">رمز عبور</string>
+    <string name="label_code">کد</string>
+    <string name="btn_signin">ورود</string>
+    <string name="google_note">ورود با گوگل فقط در صفحهٔ خود موزیلا ممکن است — اگر با گوگل ثبت‌نام کرده‌اید، از ورود وبی زیر استفاده کنید.</string>
+    <string name="btn_web_signin">استفاده از صفحهٔ موزیلا (ورود وبی)</string>
+    <string name="btn_back">بازگشت</string>
+    <string name="code_totp">کد ۶ رقمی برنامهٔ احراز هویت را وارد کنید:</string>
+    <string name="code_email">کد ۶ رقمی ایمیل‌شده را وارد کنید:</string>
+    <string name="code_recovery">یکی از کدهای بازیابی ۱۰ نویسه‌ای‌تان را وارد کنید:</string>
+    <string name="code_unblock">ورود به دلایل امنیتی مسدود شد. کد رفع مسدودیت ۸ نویسه‌ای ایمیل را وارد کنید:</string>
+    <string name="code_link">لینک ورود به ایمیل‌تان فرستاده شد. در برنامهٔ ایمیل رویش بزنید — این صفحه خودش تمام می‌شود.</string>
+    <string name="btn_verify">تأیید</string>
+    <string name="btn_resend">ارسال دوبارهٔ کد</string>
+    <string name="btn_recovery">استفاده از کد بازیابی</string>
+    <string name="msg_enter_both">ایمیل و رمز را وارد کنید.</string>
+    <string name="msg_signing_in">در حال ورود…</string>
+    <string name="msg_signin_again">اول دوباره وارد شوید.</string>
+    <string name="msg_enter_code">کد را وارد کنید.</string>
+    <string name="msg_retry_unblock">تلاش دوباره با کد رفع مسدودیت…</string>
+    <string name="msg_code_unverified">کد قبول شد ولی نشست هنوز تأیید نشده است. دوباره تلاش کنید.</string>
+    <string name="msg_fresh_code">کد تازه در راه است.</string>
+    <string name="msg_waiting_link">هنوز منتظر لینک ایمیل هستیم — یا از ورود وبی زیر استفاده کنید.</string>
+    <string name="msg_signin_failed">ورود ناموفق بود: %1$s</string>
+    <string name="msg_verify_failed">تأیید ناموفق بود: %1$s</string>
+    <string name="msg_resend_failed">ارسال دوباره ناموفق بود: %1$s</string>
+    <string name="msg_save_failed">ورود انجام شد ولی ذخیرهٔ نشست ناموفق بود: %1$s</string>
+
+    <!-- How it works -->
+    <string name="how_title">نحوهٔ کارکرد</string>
+    <string name="how_caption">ترافیک شما در یک تونل رمزنگاری‌شدهٔ MASQUE از سرور موزیلا در کشور انتخابی‌تان عبور می‌کند — آی‌پی و موقعیت واقعی شما پنهان می‌ماند و برنامه‌های بانکی و حساس مستقیم وصل می‌شوند.</string>
+
+    <!-- Notification + tile -->
+    <string name="notif_connected">متصل — از مسیر Mozilla MASQUE</string>
+    <string name="notif_session">متصل · ↓ %1$s · ↑ %2$s در این نشست</string>
+    <string name="notif_disconnect">قطع کردن</string>
+
+    <!-- Biometric prompt -->
+    <string name="bio_prompt_title">باز کردن FPN Tunnel</string>
+    <string name="bio_prompt_sub">برای استفاده از ورود موزیلا، هویت‌تان را تأیید کنید</string>
+
+    <!-- Updater -->
+    <string name="upd_check_failed">بررسی به‌روزرسانی ممکن نشد</string>
+    <string name="upd_latest">آخرین نسخه را دارید (%1$s)</string>
+    <string name="upd_available_title">نسخهٔ تازه آماده است</string>
+    <string name="upd_available_msg">%1$s%2$s\n\nهمین حالا دانلود و نصب شود؟</string>
+    <string name="upd_size">" (%.1f مگابایت)"</string>
+    <string name="btn_update">به‌روزرسانی</string>
+    <string name="btn_later">بعداً</string>
+    <string name="upd_perm_title">یک اجازهٔ یک‌باره لازم است</string>
+    <string name="upd_perm_msg">اندروید از شما می‌خواهد به FPN Tunnel اجازه دهید به‌روزرسانی‌های خودش را نصب کند. در صفحهٔ بعد «اجازه از این منبع» را روشن کنید، برگردید و دوباره «بررسی به‌روزرسانی» را بزنید.</string>
+    <string name="btn_open_settings">باز کردن تنظیمات</string>
+    <string name="upd_cant_open_settings">تنظیمات باز نشد</string>
+    <string name="upd_downloading">در حال دانلود به‌روزرسانی…</string>
+    <string name="upd_download_failed">دانلود ناموفق بود — بعداً دوباره تلاش کنید</string>
+    <string name="upd_rejected">به‌روزرسانی رد شد: فایل دانلودشده امضای FPN Tunnel را ندارد</string>
+    <string name="upd_updated">به‌روز شد — برنامه از نو باز می‌شود</string>
+    <string name="upd_root_failed">نصب روتی ناموفق بود — از نصب‌کنندهٔ معمولی استفاده می‌شود</string>
+    <string name="upd_install_failed">نصب ناموفق بود: %1$s</string>
+
+    <!-- Countries (order MUST match MainActivity.COUNTRIES codes) -->
+    <string-array name="country_names">
+        <item>آلمان</item>
+        <item>آمریکا</item>
+        <item>بریتانیا</item>
+        <item>فرانسه</item>
+        <item>هلند</item>
+        <item>کانادا</item>
+        <item>ژاپن</item>
+        <item>استرالیا</item>
+        <item>آرژانتین</item>
+        <item>آفریقای جنوبی</item>
+        <item>اتریش</item>
+        <item>بلژیک</item>
+        <item>برزیل</item>
+        <item>بلغارستان</item>
+        <item>شیلی</item>
+        <item>کلمبیا</item>
+        <item>دانمارک</item>
+        <item>فنلاند</item>
+        <item>غنا</item>
+        <item>ایرلند</item>
+        <item>ایتالیا</item>
+        <item>مالزی</item>
+        <item>مکزیک</item>
+        <item>نیوزیلند</item>
+        <item>نروژ</item>
+        <item>پرو</item>
+        <item>فیلیپین</item>
+        <item>پرتغال</item>
+        <item>سنگاپور</item>
+        <item>کرهٔ جنوبی</item>
+        <item>اسپانیا</item>
+        <item>سوئد</item>
+        <item>تایلند</item>
+    </string-array>
+</resources>

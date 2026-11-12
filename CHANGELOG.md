@@ -4,6 +4,37 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [4.4.0]
+
+### Added — bilingual UI (English / فارسی) and a Settings screen
+- The whole interface is now bilingual: every screen, dialog, the
+  Connection Doctor's report, notifications and the updater render
+  in English or Persian from string resources, with full RTL layout
+  in Persian. A language switcher lives in Settings; the first-run
+  default follows the device locale.
+- New Settings screen (gear on the main page): language, accounts,
+  Connection Doctor, How-it-works, diagnostics, full usage details,
+  biometric lock, error reports, root mode and updates.
+- The fox got a new look: an original glossy, dimensional
+  ("3D-style") render replaces the flat low-poly fox — as the
+  launcher icon (adaptive icon with legacy fallbacks) and as the
+  main-screen hero, where the halo, orbit ring and state behaviour
+  of the old orb carry over (dim/desaturated when off, warm while
+  connecting, full glow when connected).
+
+### Changed — one fixed main page
+- The main screen no longer scrolls: fox + state, the connect
+  button, location and the account pill fit a single page in both
+  languages and every state; everything else moved to Settings.
+- Dialogs (accounts, Doctor results, root mode) are styled to match
+  the app — dark sheets with a verdict header for the Doctor —
+  instead of the stock white system dialogs.
+- Sign-in form rebuilt on the same design kit: dark fields (the old
+  stock fields rendered black text on the navy background), proper
+  labels, one primary action.
+- The connection state still renders purely from `FpnVpnService`
+  (the 4.3.1 single source of truth); transitions get a subtle fade.
+
 ## [4.3.1]
 
 ### Fixed — the UI could show the wrong connection state

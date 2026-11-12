@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <dimen name="screen_pad">20dp</dimen>
+    <dimen name="card_pad">20dp</dimen>
+    <dimen name="row_h">54dp</dimen>
+    <dimen name="btn_h">54dp</dimen>
+    <dimen name="section_gap">24dp</dimen>
+</resources>

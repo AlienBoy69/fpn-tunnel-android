@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="AppTheme" parent="@android:style/Theme.DeviceDefault.NoActionBar">
+        <item name="android:windowBackground">@drawable/bg_main</item>
+        <item name="android:colorAccent">#2DD4BF</item>
+        <item name="android:textColorPrimary">#EAF1FF</item>
+        <item name="android:textColorSecondary">#9FB2D8</item>
+        <item name="android:statusBarColor">#0A1122</item>
+    </style>
+
+    <style name="FpnDialog" parent="@android:style/Theme.DeviceDefault.Dialog">
+        <item name="android:windowBackground">@drawable/dialog_bg</item>
+        <item name="android:textColorPrimary">#EAF1FF</item>
+        <item name="android:textColorSecondary">#B9C8E8</item>
+        <item name="android:colorAccent">#2DD4BF</item>
+    </style>
+
+    <style name="SectionLabel">
+        <item name="android:layout_width">wrap_content</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:letterSpacing">0.16</item>
+        <item name="android:textColor">#8FA3CC</item>
+        <item name="android:textSize">12sp</item>
+        <item name="android:textStyle">bold</item>
+    </style>
+
+    <style name="RowBtn">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">54dp</item>
+        <item name="android:background">@drawable/row_bg</item>
+        <item name="android:gravity">start|center_vertical</item>
+        <item name="android:paddingStart">18dp</item>
+        <item name="android:paddingEnd">18dp</item>
+        <item name="android:textColor">#DCE7FA</item>
+        <item name="android:textSize">15sp</item>
+        <item name="android:textAllCaps">false</item>
+        <item name="android:minHeight">0dp</item>
+    </style>
+
+    <style name="Divider">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">1dp</item>
+        <item name="android:layout_marginStart">18dp</item>
+        <item name="android:layout_marginEnd">18dp</item>
+        <item name="android:background">#22355E</item>
+    </style>
+</resources>
