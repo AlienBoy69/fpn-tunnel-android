@@ -1,3 +1,4 @@
+<p align="center"><img src="docs/images/app-icon.png" width="120" alt="FPN Tunnel icon"></p>
 # FPN Tunnel for Android
 
 **Use the Mozilla VPN / Firefox Private Network subscription you already paid for — on any Android phone, from anywhere, including networks that filter it.**
