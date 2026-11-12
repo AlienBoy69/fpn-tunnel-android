@@ -85,7 +85,17 @@ public class FpnEngine {
 
     private volatile String effectiveCountry;
     private volatile long lastRepickMs;
-    private final java.util.concurrent.BlockingQueue<SSLSocket> tlsPool =
+    // 4.4.1: pooled sockets carry their birth time — a socket older
+    // than POOL_MAX_AGE_MS is closed instead of reused, because the
+    // NAT mapping in front of it may be long dead (isConnected() can
+    // not see that) and a dead pooled socket costs a full retry.
+    private static final class PooledSock {
+        final SSLSocket sock;
+        final long bornMs;
+        PooledSock(SSLSocket s) { sock = s; bornMs = System.currentTimeMillis(); }
+    }
+    private static final long POOL_MAX_AGE_MS = 120_000;
+    private final java.util.concurrent.BlockingQueue<PooledSock> tlsPool =
             new java.util.concurrent.LinkedBlockingQueue<>();
 
     // Fix A: per-host CONNECT health. A gateway that answers MASQUE
@@ -175,6 +185,7 @@ public class FpnEngine {
         new Thread(this::ctrlLoop, "fpn-ctrl").start();
         log("proxy on 127.0.0.1:" + PORT + " -> " + up.hostname + ":" + up.port + " (" + country + ")"
                 + " rtt=" + up.rttMs + "ms");
+        persistServerList(null, up.hostname);
         startPoolWarmer();
     }
 
@@ -352,9 +363,36 @@ public class FpnEngine {
     // ── Server list ─────────────────────────────────────────────────────────
     private List<Country> loadServerList() throws Exception {
         if (serverList != null && System.currentTimeMillis() - serverListAtMs < 3600_000) return serverList;
+        // 4.4.1: seed from the on-disk snapshot (written by every
+        // successful fetch, or from the bundled asset on first run) so
+        // a fresh engine never gates the connect on the Remote
+        // Settings fetch; a background refresh replaces it when it
+        // lands. With no snapshot anywhere, today's blocking fetch
+        // runs unchanged.
+        if (serverList == null) {
+            List<Country> disk = loadServerListDisk();
+            if (disk != null) {
+                serverList = disk;
+                serverListAtMs = diskListAtMs;
+                refreshServerListAsync();
+                return serverList;
+            }
+        }
+        JSONObject body = fetchServerListJson();
+        List<Country> out = parseServerList(body);
+        serverList = out;
+        serverListAtMs = System.currentTimeMillis();
+        persistServerList(body, null);
+        return out;
+    }
+
+    private JSONObject fetchServerListJson() throws Exception {
         FpnNet.Resp r = httpTransport("GET", new URL(SERVERLIST_URL), null, null);
         if (r.status != 200) throw new Exception("server list: HTTP " + r.status);
-        JSONObject body = new JSONObject(r.body);
+        return new JSONObject(r.body);
+    }
+
+    private List<Country> parseServerList(JSONObject body) throws Exception {
         JSONArray data = body.optJSONArray("data");
         List<Country> out = new ArrayList<>();
         Set<String> seen = new HashSet<>();
@@ -380,8 +418,77 @@ public class FpnEngine {
                 if (!servers.isEmpty()) out.add(new Country(code, raw.optString("name", code), servers));
             }
         }
-        serverList = out; serverListAtMs = System.currentTimeMillis();
         return out;
+    }
+
+    // ── Server-list persistence (4.4.1) ─────────────────────────────
+    private long diskListAtMs;
+    private volatile boolean listRefreshRunning;
+    private final Object listDiskLock = new Object();
+
+    private List<Country> loadServerListDisk() {
+        File dir = filesDir();
+        if (dir == null) return null;
+        try {
+            File f = new File(dir, "fpn_serverlist.json");
+            if (!f.exists()) return null;
+            JSONObject doc = new JSONObject(readFile(f));
+            JSONObject rs = doc.optJSONObject("rs");
+            if (rs == null) return null;
+            List<Country> out = parseServerList(rs);
+            if (out.isEmpty()) return null;
+            diskListAtMs = doc.optLong("savedAtMs", f.lastModified());
+            log("server list: disk snapshot (" + out.size() + " countries)");
+            return out;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private void persistServerList(JSONObject rsBody, String winnerHost) {
+        File dir = filesDir();
+        if (dir == null) return;
+        synchronized (listDiskLock) {
+            try {
+                File f = new File(dir, "fpn_serverlist.json");
+                JSONObject doc = f.exists() ? new JSONObject(readFile(f)) : new JSONObject();
+                if (rsBody != null) {
+                    doc.put("rs", rsBody);
+                    doc.put("savedAtMs", System.currentTimeMillis());
+                }
+                if (winnerHost != null) doc.put("winner", winnerHost);
+                File tmp = new File(dir, "fpn_serverlist.json.tmp");
+                java.io.FileWriter w = new java.io.FileWriter(tmp);
+                w.write(doc.toString());
+                w.close();
+                if (!tmp.renameTo(f)) {
+                    try { f.delete(); } catch (Exception ignored) { }
+                    tmp.renameTo(f);
+                }
+            } catch (Exception ignored) { }
+        }
+    }
+
+    private void refreshServerListAsync() {
+        if (listRefreshRunning) return;
+        listRefreshRunning = true;
+        new Thread(() -> {
+            // The snapshot already unblocked this connect; wait out
+            // its critical path (pass fetch + first CONNECT) before
+            // spending uplink on the refresh.
+            try { Thread.sleep(4000); } catch (InterruptedException ignored) { }
+            try {
+                JSONObject body = fetchServerListJson();
+                List<Country> fresh = parseServerList(body);
+                if (!fresh.isEmpty()) {
+                    serverList = fresh;
+                    serverListAtMs = System.currentTimeMillis();
+                    persistServerList(body, null);
+                    log("server list: background refresh ok (" + fresh.size() + " countries)");
+                }
+            } catch (Exception ignored) { }
+            listRefreshRunning = false;
+        }, "fpn-list").start();
     }
 
     /**
@@ -503,10 +610,10 @@ public class FpnEngine {
                 try {
                     if (tlsPool.size() < 3) {
                         SSLSocket s = handshakeTls(up);
-                        if (s != null) tlsPool.offer(s);
+                        if (s != null) tlsPool.offer(new PooledSock(s));
                         else Thread.sleep(1200);
                     } else {
-                        Thread.sleep(400);
+                        Thread.sleep(1500);
                     }
                 } catch (Exception e) {
                     try { Thread.sleep(1200); } catch (InterruptedException ignored) { }
@@ -516,9 +623,9 @@ public class FpnEngine {
     }
 
     private void drainPool() {
-        SSLSocket s;
-        while ((s = tlsPool.poll()) != null) {
-            try { s.close(); } catch (Exception ignored) { }
+        PooledSock ps;
+        while ((ps = tlsPool.poll()) != null) {
+            try { ps.sock.close(); } catch (Exception ignored) { }
         }
     }
 
@@ -740,26 +847,60 @@ public class FpnEngine {
         Object[] hit = dnsCache.get(host);
         if (hit != null && System.currentTimeMillis() < (Long) hit[1])
             return (InetAddress) hit[0];
+        // 4.4.1: seed the cache once per engine from the on-disk
+        // last-good IPs persisted by earlier runs. A stale seed is
+        // self-healing: it fails the TCP probe like any dead answer,
+        // and every connect builds a fresh engine that re-resolves.
+        seedDnsFromDisk();
+        hit = dnsCache.get(host);
+        if (hit != null && System.currentTimeMillis() < (Long) hit[1]) {
+            log("resolved " + host + " -> " + ((InetAddress) hit[0]).getHostAddress()
+                    + " via disk seed");
+            return (InetAddress) hit[0];
+        }
+        long t0 = System.currentTimeMillis();
+        // 4.4.1: race the DoH set (mirrors FpnNet.resolvePublic) —
+        // first public answer wins, so one black-holed resolver can no
+        // longer stall the connect path behind serial 6 s timeouts.
         String[] dohUrls = {
                 "https://8.8.8.8/resolve?name=" + host + "&type=A",
-                "https://1.1.1.1/dns-query?name=" + host + "&type=A"};
-        for (String u : dohUrls) {
-            try {
-                InetAddress ip = dohResolve(u);
-                if (ip != null) {
-                    dnsCache.put(host, new Object[]{ip, System.currentTimeMillis() + 300000});
-                    log("resolved " + host + " -> " + ip.getHostAddress() + " via DoH");
-                    return ip;
-                }
-            } catch (Exception e) { Log.d(TAG, "doh failed: " + e); }
+                "https://8.8.4.4/resolve?name=" + host + "&type=A",
+                "https://1.1.1.1/dns-query?name=" + host + "&type=A",
+                "https://1.0.0.1/dns-query?name=" + host + "&type=A",
+                "https://9.9.9.9/dns-query?name=" + host + "&type=A"};
+        final java.util.concurrent.atomic.AtomicReference<InetAddress> dohHit =
+                new java.util.concurrent.atomic.AtomicReference<>();
+        final java.util.concurrent.CountDownLatch dohDone =
+                new java.util.concurrent.CountDownLatch(1);
+        for (final String u : dohUrls) {
+            Thread t = new Thread(() -> {
+                try {
+                    InetAddress ip = dohResolve(u);
+                    if (ip != null && dohHit.compareAndSet(null, ip)) dohDone.countDown();
+                } catch (Exception ignored) { }
+            }, "fpn-doh");
+            t.setDaemon(true);
+            t.start();
         }
-        String[] udpServers = {"8.8.8.8", "1.1.1.1", "9.9.9.9"};
+        try { dohDone.await(2500, java.util.concurrent.TimeUnit.MILLISECONDS); }
+        catch (Exception ignored) { }
+        InetAddress raced = dohHit.get();
+        if (raced != null) {
+            dnsCache.put(host, new Object[]{raced, System.currentTimeMillis() + 300000});
+            persistDns(host, raced);
+            log("resolved " + host + " -> " + raced.getHostAddress()
+                    + " via DoH race (" + (System.currentTimeMillis() - t0) + "ms)");
+            return raced;
+        }
+        String[] udpServers = {"8.8.8.8", "8.8.4.4", "1.1.1.1", "1.0.0.1", "9.9.9.9"};
         for (String srv : udpServers) {
             try {
                 InetAddress ip = udpResolve(host, srv);
                 if (ip != null) {
                     dnsCache.put(host, new Object[]{ip, System.currentTimeMillis() + 300000});
-                    log("resolved " + host + " -> " + ip.getHostAddress() + " via UDP " + srv);
+                    persistDns(host, ip);
+                    log("resolved " + host + " -> " + ip.getHostAddress() + " via UDP " + srv
+                            + " (" + (System.currentTimeMillis() - t0) + "ms)");
                     return ip;
                 }
             } catch (Exception e) { Log.d(TAG, "udp dns failed " + srv + ": " + e); }
@@ -767,6 +908,57 @@ public class FpnEngine {
         InetAddress sys = InetAddress.getByName(host);
         log("resolved " + host + " -> " + sys.getHostAddress() + " via SYSTEM (last resort)");
         return sys;
+    }
+
+    // ── DNS persistence (4.4.1): last-good gateway IPs on disk ──────
+    private volatile boolean dnsSeeded;
+    private final Object dnsDiskLock = new Object();
+
+    private File filesDir() {
+        return countryFile != null ? countryFile.getParentFile() : null;
+    }
+
+    private void seedDnsFromDisk() {
+        if (dnsSeeded) return;
+        dnsSeeded = true;
+        File dir = filesDir();
+        if (dir == null) return;
+        try {
+            File f = new File(dir, "fpn_dns.json");
+            if (!f.exists()) return;
+            JSONObject doc = new JSONObject(readFile(f));
+            JSONArray names = doc.names();
+            if (names == null) return;
+            long now = System.currentTimeMillis();
+            for (int i = 0; i < names.length(); i++) {
+                String host = names.getString(i);
+                String ipStr = doc.getJSONObject(host).optString("ip", null);
+                if (ipStr == null) continue;
+                InetAddress ip = InetAddress.getByName(ipStr);
+                if (isPublic(ip)) dnsCache.put(host, new Object[]{ip, now + 300000});
+            }
+        } catch (Exception ignored) { }
+    }
+
+    private void persistDns(String host, InetAddress ip) {
+        File dir = filesDir();
+        if (dir == null) return;
+        synchronized (dnsDiskLock) {
+            try {
+                File f = new File(dir, "fpn_dns.json");
+                JSONObject doc = f.exists() ? new JSONObject(readFile(f)) : new JSONObject();
+                doc.put(host, new JSONObject().put("ip", ip.getHostAddress())
+                        .put("at", System.currentTimeMillis()));
+                File tmp = new File(dir, "fpn_dns.json.tmp");
+                java.io.FileWriter w = new java.io.FileWriter(tmp);
+                w.write(doc.toString());
+                w.close();
+                if (!tmp.renameTo(f)) {
+                    try { f.delete(); } catch (Exception ignored) { }
+                    tmp.renameTo(f);
+                }
+            } catch (Exception ignored) { }
+        }
     }
 
     private InetAddress dohResolve(String url) throws Exception {
@@ -873,6 +1065,11 @@ public class FpnEngine {
             // Fix I: bound the connect phase to ~6 s — on a filtered
             // network a dead exit must be abandoned fast, not after 15 s.
             s.connect(new java.net.InetSocketAddress(upIp, up.port), 6000);
+            // 4.4.1: the CONNECT request is tiny and latency-critical —
+            // Nagle would hold it for the delayed-ACK dance; and TCP
+            // keepalive lets the stack notice a NAT-dead path early.
+            try { s.setTcpNoDelay(true); } catch (Exception ignored) { }
+            try { s.setKeepAlive(true); } catch (Exception ignored) { }
             s.setSoTimeout(UPSTREAM_TIMEOUT_MS);
             // SNI for the real hostname + ALPN http/1.1 — the MASQUE
             // frontend expects both; the Node build set them explicitly.
@@ -901,8 +1098,15 @@ public class FpnEngine {
 
     private UpConn openUpstream(Upstream up, String passToken, String host, int port,
                                 boolean usePool) throws Exception {
-        SSLSocket s = usePool ? tlsPool.poll() : null;
-        if (s != null && (s.isClosed() || !s.isConnected())) s = null;
+        // 4.4.1: reject pooled sockets older than POOL_MAX_AGE_MS —
+        // a NAT-killed pooled socket is invisible to isClosed().
+        PooledSock ps = usePool ? tlsPool.poll() : null;
+        SSLSocket s = ps != null ? ps.sock : null;
+        if (s != null && (s.isClosed() || !s.isConnected()
+                || System.currentTimeMillis() - ps.bornMs > POOL_MAX_AGE_MS)) {
+            try { s.close(); } catch (Exception ignored) { }
+            s = null;
+        }
         if (s == null) {
             s = handshakeTls(up);
         } else {

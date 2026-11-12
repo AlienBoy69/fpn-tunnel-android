@@ -143,7 +143,10 @@ public class FpnVpnService extends VpnService {
         noteUpdaterOn = true;
         new Thread(() -> {
             while (noteUpdaterOn && tun != null) {
-                try { Thread.sleep(4000); } catch (InterruptedException e) { return; }
+                // 4.4.1: 10 s cadence (was 4 s) — the loop persists
+                // usage and rewrites the notification every pass;
+                // nobody watches it tick faster than this.
+                try { Thread.sleep(10000); } catch (InterruptedException e) { return; }
                 if (!noteUpdaterOn || tun == null) return;
                 persistUsage();
                 FpnEngine e = engine;
@@ -235,6 +238,21 @@ public class FpnVpnService extends VpnService {
 
     /** Build (but do not start) an engine bound to this app's files. */
     FpnEngine newEngine() {
+        // 4.4.1: on first ever run, seed the engine's on-disk
+        // server-list snapshot from the bundled asset copy so the
+        // first cold connect need not wait on the Remote Settings
+        // fetch (every later fetch refreshes the same file).
+        try {
+            File seed = new File(getFilesDir(), "fpn_serverlist.json");
+            if (!seed.exists()) {
+                try (java.io.InputStream in = getAssets().open("serverlist.json");
+                     FileOutputStream out = new FileOutputStream(seed)) {
+                    byte[] buf = new byte[8192];
+                    int n;
+                    while ((n = in.read(buf)) > 0) out.write(buf, 0, n);
+                }
+            }
+        } catch (Exception ignored) { }
         return new FpnEngine(FpnSession.file(this),
                 new File(getFilesDir(), "country.txt"),
                 new File(getFilesDir(), "engine_log.txt"),
@@ -461,6 +479,10 @@ public class FpnVpnService extends VpnService {
                 + "  cache-size: 10000\n"
                 + "misc:\n"
                 + "  task-stack-size: 81920\n"
+                // 4.4.1: bound concurrent tunnel sessions (~200 seen
+                // live; 1024 = headroom without a runaway app being
+                // able to exhaust fds / memory).
+                + "  max-session-count: 1024\n"
                 + "  log-file: stderr\n"
                 + "  log-level: warn\n";
     }

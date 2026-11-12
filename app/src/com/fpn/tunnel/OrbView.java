@@ -90,6 +90,7 @@ public class OrbView extends View {
     private float settleYpx = 0f;    // residual sink while OFF
     private ColorMatrixColorFilter filterOff, filterConnecting;
     private final Paint haloPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Path haloClip = new Path();
     // The hero art carries a REAL alpha channel (its flat navy is
     // keyed out with a soft matte) and sits directly on the card —
     // no underlay, no pool, no rectangle of any kind behind it.
@@ -243,9 +244,19 @@ public class OrbView extends View {
                 : Color.argb(26, 120, 150, 200);
         int teal = state == STATE_ON ? Color.argb(80, 64, 224, 178)
                 : Color.argb(0, 64, 224, 178);
+        // 4.4.1 halo fix: the falloff now completes at 0.85 of the
+        // radius (was 1.0). The view is only 190dp square and the old
+        // disc reached ~95% of its half-width at the CONNECTING pulse
+        // peak — and past the bounds during the →ON flare — so the
+        // still-visible gradient was clipped by the SQUARE view
+        // bounds and the halo read as a square (Majid's report on
+        // 4.4.0). The glow is now fully transparent from 425 units
+        // out, well inside every bound at any animation scale.
         haloPaint.setShader(new RadialGradient(cx, cy, r,
                 new int[]{teal, warm, Color.TRANSPARENT},
-                new float[]{0f, 0.55f, 1f}, Shader.TileMode.CLAMP));
+                new float[]{0f, 0.50f, 0.85f}, Shader.TileMode.CLAMP));
+        haloClip.reset();
+        haloClip.addCircle(cx, cy, 470f * unit, Path.Direction.CW);
     }
 
     /** Modulate a palette color for the current state + a light shimmer. */
@@ -309,7 +320,12 @@ public class OrbView extends View {
                 : 1f;
         haloPaint.setAlpha((int) (255 * Math.min(1f, flare)));
         canvas.save();
-        canvas.scale(pulse * flare, pulse * flare, cx, cy);
+        // 4.4.1: the flare no longer scales the halo (that scale is
+        // what pushed the disc past the square view bounds), and a
+        // circular clip bounds the glow in every frame — the halo's
+        // silhouette is a circle by construction now, at any pulse.
+        if (!haloClip.isEmpty()) canvas.clipPath(haloClip);
+        canvas.scale(pulse, pulse, cx, cy);
         canvas.drawCircle(cx, cy, 500f * unit, haloPaint);
         canvas.restore();
         haloPaint.setAlpha(255);

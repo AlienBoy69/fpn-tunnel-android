@@ -4,6 +4,49 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [4.4.1]
+
+### Changed — optimization pass: faster connects, smaller, gentler
+- Connect path (from the 2026-11-12 connect-path research):
+  - The gateway resolver now RACES the DoH set (first public answer
+    wins, 2.5 s bound) instead of walking serial resolvers with 6 s
+    timeouts — one black-holed resolver can no longer stall a
+    connect for ~24 s. Last-good gateway IPs persist on disk and
+    seed the next connect (a stale seed fails the TCP probe and
+    re-resolves, as before). The serial UDP/system chain remains
+    as the fallback.
+  - The server list persists on disk: a fresh engine seeds from
+    the snapshot instantly and refreshes it in the background
+    (every successful fetch rewrites it; the winning gateway is
+    recorded with it). A bundled snapshot ships in the APK for the
+    first ever run. The 502/503 quarantine, 407 pass-refresh and
+    cross-country failover logic are untouched.
+  - Upstream socket hygiene: TCP_NODELAY + keepalive on the
+    gateway socket (the CONNECT request is tiny and
+    latency-critical), and pooled TLS sockets now carry a 120 s
+    max age — a NAT-killed pooled socket used to be invisible to
+    isClosed() and cost a full retry.
+  - The tunnel core caps concurrent sessions (hev
+    max-session-count: 1024; ~200 observed live).
+- Halo fix: during CONNECTING (and the connected flare) the light
+  halo around the fox could read as SQUARE — its disc reached
+  ~95% of the small view's half-width at the pulse peak and past
+  the bounds during the flare, so the still-visible gradient was
+  clipped by the square view bounds. The falloff now completes at
+  0.85 of the radius, the flare no longer scales the halo, and a
+  circular clip bounds the glow — the halo is circular in every
+  state, at every animation frame.
+- Size: the APK drops from 1,527,476 to 1,137,992 bytes (−25%):
+  launcher icons and the how-it-works graphic are palette-quantized
+  (visually verified), six unreferenced drawables are removed.
+- Battery: the notification/usage updater ticks every 10 s instead
+  of 4 s; the TLS pool warmer idles at 1.5 s instead of 0.4 s.
+  Measured on the reference device (same conditions, medians of
+  10 connects): cold connect 5.28 s → 4.57 s, with the
+  resolve/list phase itself down from ~1.6–2.7 s to ~0.3 s; warm
+  connect unchanged (4.62 s → 4.65 s); app cold start ~0.3 s,
+  unchanged.
+
 ## [4.4.0]
 
 ### Added — bilingual UI (English / فارسی) and a Settings screen
