@@ -71,6 +71,7 @@
     <string name="row_diag">ارسال گزارش تشخیصی</string>
     <string name="row_diag_alert">⚠ ارسال گزارش تشخیصی — برای بهتر شدن FPN Tunnel</string>
     <string name="row_update">بررسی به‌روزرسانی</string>
+    <string name="row_split">برنامه‌های خارج از VPN</string>
     <string name="state_on">روشن</string>
     <string name="state_off">خاموش</string>
     <string name="value_sep">" · %1$s"</string>
@@ -140,6 +141,14 @@
     <string name="rep_service_perm">سرویس VPN از نو روشن شد — اجازهٔ VPN وجود ندارد</string>
     <string name="rep_service_no">روشن‌کردن دوبارهٔ سرویس VPN — درست نشد</string>
     <string name="leak_failed">آزمون نشت: ناموفق (%1$s)</string>
+
+    <!-- Split tunneling (apps outside the VPN) -->
+    <string name="split_title">برنامه‌های خارج از VPN</string>
+    <string name="split_hint">برنامه‌های تیک‌خورده مستقیم و بدون VPN وصل می‌شوند. تغییرات همان لحظه اعمال می‌شود — تونلِ در حال اجرا دوباره راه‌اندازی می‌شود.</string>
+    <string name="split_search_hint">جستجوی برنامه‌ها</string>
+    <string name="split_loading">در حال بارگذاری برنامه‌ها…</string>
+    <string name="split_none">برنامه‌ای پیدا نشد</string>
+    <string name="split_restarting">تونل برای اعمال تغییرات دوباره راه‌اندازی می‌شود…</string>
 
     <!-- Root panel -->
     <string name="root_title">حالت روت</string>

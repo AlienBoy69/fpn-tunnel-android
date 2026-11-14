@@ -1,0 +1,1 @@
+New: Apps outside the VPN. Settings now has a per-app split-tunnel list — pick which apps connect directly without the VPN (games, banking, anything that dislikes tunnels). The built-in protections (Termux, the Muse app, Sina Bank and FPN Tunnel itself) stay pinned, always on and locked. Changes apply right away: a running tunnel restarts to pick them up.

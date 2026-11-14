@@ -35,7 +35,7 @@ import java.net.URL;
  */
 public class SettingsActivity extends Activity {
     private final Handler ui = new Handler(Looper.getMainLooper());
-    private TextView statusLine, bioValue, errValue, rootValue, updValue;
+    private TextView statusLine, bioValue, errValue, rootValue, updValue, splitValue;
     private View acctRowView;
     private TextView usageBody;
     private boolean doctorRunning = false;
@@ -110,6 +110,11 @@ public class SettingsActivity extends Activity {
         connCard.addView(Ui.divider(this));
         connCard.addView(Ui.row(this, getString(R.string.row_diag), null,
                 v -> shareDiagnostics()));
+        connCard.addView(Ui.divider(this));
+        splitValue = new TextView(this);
+        connCard.addView(Ui.row(this, getString(R.string.row_split), splitValue,
+                v -> SplitTunnel.show(this, msg -> statusLine.setText(msg),
+                        this::refreshSplitValue)));
         root.addView(connCard);
 
         // ── usage ────────────────────────────────────────────────
@@ -187,6 +192,7 @@ public class SettingsActivity extends Activity {
 
         refreshAccountRow();
         refreshUsage();
+        refreshSplitValue();
         if (errValue != null)
             errValue.setText(getString(ErrorReporter.isEnabled(this)
                     ? R.string.state_on : R.string.state_off));
@@ -380,11 +386,19 @@ public class SettingsActivity extends Activity {
         }
     };
 
+    /** Value on the split-tunnel row: how many apps the user has
+     *  put outside the VPN (built-ins are not counted). */
+    private void refreshSplitValue() {
+        if (splitValue != null)
+            splitValue.setText(String.valueOf(SplitTunnel.userExcluded(this).size()));
+    }
+
     @Override
     protected void onResume() {
         super.onResume();
         alive = true;
         refreshUsage();
+        refreshSplitValue();
         ui.post(usageTick);
     }
 

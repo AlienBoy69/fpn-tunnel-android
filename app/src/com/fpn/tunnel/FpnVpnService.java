@@ -32,12 +32,18 @@ public class FpnVpnService extends VpnService {
     private static final String TAG = "fpntunnel";
     private static final int NOTE_ID = 1;
     private static final String CHANNEL = "fpn";
-    // Never routed into the tunnel (they stay on the direct connection):
-    // Termux (it runs the proxy engine itself), this app, the Muse app
-    // (example: a chat app its operator wants reachable directly), and
-    // Sina Bank (a foreign exit can trip the bank's fraud lock).
-    private static final String[] SKIP = {
-            "com.termux", "com.fpn.tunnel", "com.facebook.aura", "com.tosan.dara.sina" };
+    // Self-exclusion — an implementation necessity, NOT a product
+    // default (4.5.1 removed every forced bypass; split tunneling is
+    // entirely the user's choice, see SplitTunnel). This app's own
+    // package is the single exception, and it is structural: the
+    // engine's upstream sockets (FpnEngine/FpnNet) are plain sockets
+    // created WITHOUT VpnService.protect() — and its HttpURLConnection
+    // control-plane fetches cannot be protected at all — so if this
+    // UID were routed into the TUN, the gateway connection would loop
+    // straight back through hev into the engine and the tunnel could
+    // never come up. The app therefore always excludes ITSELF from
+    // its own tunnel, whatever its (cosmetic) row in the picker says.
+    static final String SELF = "com.fpn.tunnel";
 
     // ── UI state: the service is the single source of truth ──────────
     // The tunnel's real state lives HERE, never in the engine's
@@ -322,9 +328,24 @@ public class FpnVpnService extends VpnService {
                     .setConfigureIntent(PendingIntent.getActivity(this, 0,
                             new Intent(this, MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP),
                             PendingIntent.FLAG_IMMUTABLE));
-            for (String pkg : SKIP) {
-                try { b.addDisallowedApplication(pkg); } catch (PackageManager.NameNotFoundException ignored) {}
+            // Split tunneling: exactly the user's own "apps outside
+            // the VPN" set stays off the tunnel — plus this app
+            // itself, which can never be routed into its own tunnel
+            // (see SELF above).
+            java.util.Set<String> disallowed = new java.util.LinkedHashSet<>(
+                    SplitTunnel.userExcluded(this));
+            disallowed.add(SELF);
+            int disApplied = 0;
+            StringBuilder disLog = new StringBuilder();
+            for (String pkg : disallowed) {
+                try {
+                    b.addDisallowedApplication(pkg);
+                    disApplied++;
+                    if (disLog.length() > 0) disLog.append(", ");
+                    disLog.append(pkg);
+                } catch (PackageManager.NameNotFoundException ignored) {}
             }
+            flog("split-tunnel: " + disApplied + " apps outside VPN [" + disLog + "]");
             try { b.setMetered(false); } catch (Exception ignored) {}
             ParcelFileDescriptor fd = b.establish();
             if (fd == null) {

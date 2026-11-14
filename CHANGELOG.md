@@ -4,6 +4,52 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [4.5.1]
+
+### Changed — split tunneling is now entirely the user's choice
+- The four built-in bypasses that 4.5.0 pinned at the top of the
+  "Apps outside the VPN" list — Termux, FPN Tunnel, the Muse app
+  and Sina Bank, always checked and locked — are gone as defaults.
+  Every installed app is now an ordinary row in the one list, and
+  every row can be checked or unchecked.
+- The tunnel applies exactly the user's stored set
+  (addDisallowedApplication), nothing more.
+- One-time migration: on the first run of 4.5.1 the previous
+  effective state (your existing picks plus the old built-ins that
+  are installed) is seeded into your list, so no app's routing
+  changes until you edit the list yourself. The old defaults simply
+  start out checked.
+- The single structural exception is not a product default: the app
+  always keeps ITSELF out of its own tunnel, because its engine's
+  upstream sockets are created without VpnService.protect() (and
+  its HTTP control-plane fetches cannot be protected at all) —
+  routing its own traffic into the tunnel would loop the gateway
+  connection back into the engine and the tunnel could never
+  connect. Its list row toggles the stored set like any other;
+  the self-exclusion itself is not optional.
+
+## [4.5.0]
+
+### Added — per-app split tunneling ("Apps outside the VPN")
+- Settings gains an "Apps outside the VPN" entry: a searchable,
+  scrollable list of installed user apps (icon + name + checkbox,
+  sorted by name, loaded on demand when the sheet opens).
+  Checked apps connect directly, bypassing the tunnel; the choice
+  is stored on the device and applied every time the tunnel starts.
+- The built-in bypasses that protect the phone's own lifelines —
+  Termux, FPN Tunnel itself, the Muse app and Sina Bank — are
+  pinned at the top of the list, always checked and locked: they
+  can never be removed.
+- Changing the selection while the tunnel is running restarts the
+  tunnel so the new set takes effect immediately (the settings
+  screen says so); with the tunnel down it simply applies on the
+  next connect. The engine log records how many apps are outside
+  the VPN on every start.
+- Under the hood this is Android's per-app VPN exclusion
+  (addDisallowedApplication) fed from the union of the built-in
+  set and the user's set; uninstalled packages are skipped
+  silently.
+
 ## [4.4.1]
 
 ### Changed — optimization pass: faster connects, smaller, gentler
