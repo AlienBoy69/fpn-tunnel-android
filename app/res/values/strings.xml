@@ -111,6 +111,7 @@
     <string name="reason_e5">Mozilla rejected the sign-in token. Sign in again.</string>
     <string name="reason_e6">VPN permission was not granted. Tap Connect and allow the VPN connection.</string>
     <string name="reason_e7">Something unexpected went wrong. Please send diagnostics so we can look into it.</string>
+    <string name="reason_e8">Mozilla\'s sign-in host is blocked on this network — the exit servers themselves are reachable. Try mobile data or a different Wi-Fi.</string>
     <string name="chk_signin_present">Sign-in: present</string>
     <string name="chk_signin_missing">Sign-in: MISSING</string>
     <string name="chk_network_up">Device network: up</string>
@@ -120,6 +121,7 @@
     <string name="chk_engine_start_failed">Engine start: FAILED — %1$s</string>
     <string name="chk_pass_ok">Mozilla pass: OK (%1$s)</string>
     <string name="chk_pass_failed">Mozilla pass: FAILED — %1$s</string>
+    <string name="chk_pass_blocked">Mozilla pass: sign-in host unreachable, but the exit server answers — this network is filtering Mozilla\'s hosts</string>
     <string name="chk_dns">DNS: %1$s</string>
     <string name="chk_exit_ok">Exit health: OK — %1$s</string>
     <string name="chk_exit_failed">Exit health: FAILED (%1$s) — %2$s</string>

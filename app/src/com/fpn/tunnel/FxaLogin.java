@@ -466,6 +466,18 @@ public final class FxaLogin {
         int errno = data.optInt("errno", -1);
         int status = data.optInt("_status", 0);
         String serverMsg = data.optString("message", "");
+        // Research N11 (2026-11-16): Mozilla's edge answers some
+        // native sign-in steps with HTTP 406 — either an image-CAPTCHA
+        // challenge this form cannot render, or an empty hard block.
+        // Either way the working route is Mozilla's own page, which
+        // the sign-in screen already offers below the form; say so
+        // instead of surfacing an opaque "HTTP 406". (Full in-app
+        // captcha bridge: BACKLOG N11 design.)
+        if (status == 406)
+            return new FxaError(errno, status, "E7",
+                    "Mozilla's anti-bot check stopped the in-app sign-in. "
+                    + "Use the web sign-in button below instead — it opens "
+                    + "Mozilla's own sign-in page.");
         switch (errno) {
             case 102:
                 return new FxaError(errno, status, "E2",

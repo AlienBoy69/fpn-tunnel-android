@@ -4,6 +4,52 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [4.6.0]
+
+### Changed — VPN token mint uses the OAuth authorization-code flow
+- The engine now mints its Mozilla VPN access token primarily via
+  the authorization-code flow: `POST /oauth/authorization`
+  (Hawk + PKCE S256, Firefox for Android client) redeemed at
+  `POST /v1/token`, trying the api.accounts.firefox.com host first
+  and the oauth.accounts.firefox.com sibling on an edge hard block
+  (HTTP 406) or transport failure. The legacy `fxa-credentials`
+  exchange at `/oauth/token` — reported hard-blocked at Mozilla's
+  edge in the sign-in context (research 2026-11-16) — remains as a
+  fallback. The stored session token stays the only credential;
+  no account-data migration.
+
+### Fixed — anti-bot blocks during in-app sign-in explain themselves
+- When Mozilla's edge answers a native sign-in step with HTTP 406
+  (an image-CAPTCHA challenge or a hard block), the sign-in screen
+  now says so and points to the web sign-in button instead of
+  showing an opaque "Sign-in failed (HTTP 406)".
+
+### Fixed — a filtered pass host no longer hard-fails every connect
+- Diagnosis (2026-11-16): on ISPs that blackhole Fastly's
+  151.101.0.0/16, the pre-connect pass fetch to vpn.mozilla.org
+  timed out and every connect failed before the tunnel was even
+  attempted — while the MASQUE gateways (a different Fastly range)
+  were reachable and the pass TTL is only ~10 minutes. Three
+  changes decouple the connect from a live pass fetch:
+  - The Guardian pass is now cached on disk (per account, keyed by
+    the session uid) and a background prefetcher — started at app
+    start, 45 s tick, 5 min backoff on failure — keeps it fresh
+    whenever the app process is alive, not only while connected.
+  - When a pass fetch fails in transport (or Guardian answers
+    5xx), the connect proceeds with the cached pass while it is
+    valid or up to 15 minutes past expiry ("cached-grace"); the
+    gateway remains the judge — a rejected pass still answers 407
+    and force-refreshes. A definitive Mozilla refusal (Guardian
+    4xx, dead sign-in) is never masked by a stale pass, and with
+    no usable cached pass the connect fails as before. The engine
+    log and the status API record which path each pass took
+    (fresh / cached / cached-grace).
+  - The Connection Doctor names this exact failure: when the
+    pass fetch dies in transport while a gateway answers TCP, the
+    report is the new code E8 — "Mozilla's sign-in host is blocked
+    on this network — try mobile data" — instead of E3's
+    misleading "exit server unreachable".
+
 ## [4.5.1]
 
 ### Changed — split tunneling is now entirely the user's choice

@@ -57,7 +57,25 @@ public class FpnEngine {
     private static final int UPSTREAM_TIMEOUT_MS = 15_000;
 
     private static final String FXA_API = "https://api.accounts.firefox.com/v1";
+    /** The same FxA auth server behind Mozilla's OAuth hostname — the
+     *  sibling host is tried when the api host's edge hard-blocks a
+     *  route (empty 406), per research S8 (2026-11-16). */
+    private static final String FXA_OAUTH_API = "https://oauth.accounts.firefox.com/v1";
     private static final String FIREFOX_CLIENT_ID = "5882386c6d801776";
+    /** Firefox for Android's public OAuth client. The authorization-
+     *  code mint (getAccessToken) uses it because it has an HTTPS
+     *  redirect URI a standalone client can name; the desktop client
+     *  above only has a WebChannel URN. Same choice as the Kumiho
+     *  client (research REPORT-2026-11-16 §3a). */
+    private static final String FXA_ANDROID_CLIENT_ID = "a2270f727f45f648";
+    private static final String FXA_ANDROID_REDIRECT_URI =
+            "https://accounts.firefox.com/oauth/success/" + FXA_ANDROID_CLIENT_ID;
+    /** Desktop-Firefox UA for the OAuth code/token endpoints only:
+     *  the edge treats non-browser UAs harshly there (Kumiho's
+     *  BrowserUserAgent observation, REPORT-2026-11-16 §3a). All
+     *  other Mozilla calls keep the Fix K neutral UA. */
+    private static final String FXA_BROWSER_UA =
+            "Mozilla/5.0 (X11; Linux x86_64; rv:158.0) Gecko/20100101 Firefox/158.0";
     private static final String VPN_SCOPES = "profile https://identity.mozilla.com/apps/vpn";
     private static final String GUARDIAN_HOST = "vpn.mozilla.org";
     private static final String SERVERLIST_URL =
@@ -133,18 +151,33 @@ public class FpnEngine {
         if (up != null) sickUntilMs.remove(up.hostname);
     }
 
-    /** Drop the cached Guardian pass so the next currentPass() refetches. */
+    /** Drop the cached Guardian pass so the next currentPass() refetches.
+     *  Also drops the on-disk cache: a force-refresh is only ever
+     *  requested when the current pass is suspect (a gateway 407, every
+     *  gateway sick, or the Doctor's repair ladder), and a rejected
+     *  pass must not be resurrected later by the grace path. The
+     *  background prefetcher re-mints a fresh pass as soon as the
+     *  network allows, which restores the safety net. */
     public synchronized void forcePassRefresh() {
         passCache = null;
         passExpiresSec = 0;
+        passSource = "none";
         tokenCache = null;
         tokenExpiresMs = 0;
+        clearPassCacheDisk();
         log("pass force-refreshed");
     }
 
     // ── caches ──────────────────────────────────────────────────────────────
     private String tokenCache; private long tokenExpiresMs;
     private String passCache; private long passExpiresSec;
+    /** How the last returned pass was obtained: fresh | cached |
+     *  cached-grace | none. Surfaced in /status and the Doctor so a
+     *  degraded connect is never mistaken for a healthy one. */
+    private volatile String passSource = "none";
+    /** The most recent pass-fetch failure (null after a success). */
+    private volatile Exception lastPassError;
+    private volatile boolean lastPassFetchFailed;
     private List<Country> serverList; private long serverListAtMs;
 
     private static final class Country {
@@ -273,9 +306,19 @@ public class FpnEngine {
      */
     private FpnNet.Resp httpTransport(String method, URL url, String authHeader,
                                       byte[] body) throws Exception {
+        return httpTransport(method, url, authHeader, body, null);
+    }
+
+    private FpnNet.Resp httpTransport(String method, URL url, String authHeader,
+                                      byte[] body,
+                                      java.util.Map<String, String> extraHeaders)
+            throws Exception {
         java.util.Map<String, String> headers = new java.util.LinkedHashMap<>();
         if (body != null) headers.put("Content-Type", "application/json");
         if (authHeader != null) headers.put("Authorization", authHeader);
+        // Caller headers win over the defaults above (e.g. a form
+        // Content-Type, or the browser UA on the OAuth endpoints).
+        if (extraHeaders != null) headers.putAll(extraHeaders);
         try {
             return FpnNet.request(upstreamFactory, logFile, method, url.toString(), headers, body);
         } catch (Exception netErr) {
@@ -299,13 +342,20 @@ public class FpnEngine {
     }
 
     private JSONObject fxaPost(String path, JSONObject payload, String sessionToken) throws Exception {
-        URL url = new URL(FXA_API + path);
+        return fxaPostBase(FXA_API, path, payload, sessionToken, null);
+    }
+
+    private JSONObject fxaPostBase(String base, String path, JSONObject payload,
+                                   String sessionToken,
+                                   java.util.Map<String, String> extraHeaders)
+            throws Exception {
+        URL url = new URL(base + path);
         String body = payload.toString();
         Creds creds = sessionToken != null ? credsFor(sessionToken) : null;
         long ts = System.currentTimeMillis() / 1000;
         for (int attempt = 0; ; attempt++) {
             String auth = creds != null ? hawkHeader(url, body, creds, ts) : null;
-            FpnNet.Resp r = httpTransport("POST", url, auth, body.getBytes(StandardCharsets.UTF_8));
+            FpnNet.Resp r = httpTransport("POST", url, auth, body.getBytes(StandardCharsets.UTF_8), extraHeaders);
             JSONObject data = new JSONObject(r.body == null || r.body.isEmpty() ? "{}" : r.body);
             if (creds != null && data.optInt("errno", -1) == 111 && data.has("serverTime") && attempt == 0) {
                 ts = data.getLong("serverTime");
@@ -323,6 +373,20 @@ public class FpnEngine {
                 ? doc.getJSONObject("accountData").optString("sessionToken", null) : null;
         if (sessionToken == null || sessionToken.isEmpty())
             throw new Exception("no session token: sign in first");
+        // Primary (2026-11-16, research N1/S8): the authorization-code
+        // mint below. The legacy fxa-credentials exchange further down
+        // is reported hard-blocked at Mozilla's edge in the sign-in
+        // context (empty 406, Kumiho v1.1.0) — our own unauthenticated
+        // probe the same day still reached FxA on it, so the block
+        // looks conditional; either way the code path is the one a
+        // current client proves daily, so it goes first and the
+        // legacy exchange remains as fallback.
+        try {
+            return mintViaAuthorizationCode(sessionToken);
+        } catch (Exception codeErr) {
+            log("oauth code mint failed (" + codeErr.getMessage()
+                    + "); falling back to the legacy token exchange");
+        }
         JSONObject payload = new JSONObject()
                 .put("client_id", FIREFOX_CLIENT_ID)
                 .put("grant_type", "fxa-credentials")
@@ -340,9 +404,173 @@ public class FpnEngine {
                 + " (errno " + data.optInt("errno", -1) + ")");
     }
 
+    private static String b64Url(byte[] bytes) {
+        return Base64.encodeToString(bytes,
+                Base64.URL_SAFE | Base64.NO_WRAP | Base64.NO_PADDING);
+    }
+
+    private static String formEncode(String[][] fields) throws Exception {
+        StringBuilder sb = new StringBuilder();
+        for (String[] f : fields) {
+            if (sb.length() > 0) sb.append('&');
+            sb.append(java.net.URLEncoder.encode(f[0], "UTF-8")).append('=')
+                    .append(java.net.URLEncoder.encode(f[1], "UTF-8"));
+        }
+        return sb.toString();
+    }
+
+    /**
+     * Authorization-code token mint (research N1 update, 2026-11-16;
+     * request shapes mirror the Kumiho client's shipped flow):
+     *   1. POST /oauth/authorization (HAWK, sessionToken) with a PKCE
+     *      S256 challenge for the Firefox-for-Android client ->
+     *      {code, state}. The api host is tried first, the oauth host
+     *      second — the same auth server sits behind both hostnames
+     *      and the edge can hard-block one of them (empty 406).
+     *   2. POST /v1/token (form, no HAWK) grant_type=
+     *      authorization_code on the api host, oauth host as fallback
+     *      -> {access_token, expires_in, refresh_token?}. The refresh
+     *      token is deliberately not stored: the sessionToken remains
+     *      this app's durable credential and every mint starts from
+     *      it, exactly as the legacy exchange did.
+     * Both steps send the desktop-Firefox UA (FXA_BROWSER_UA).
+     * On success the shared token cache is set, as the legacy path
+     * did. Any failure throws; the caller falls back to legacy.
+     */
+    private String mintViaAuthorizationCode(String sessionToken) throws Exception {
+        SecureRandom sr = new SecureRandom();
+        byte[] verifierBytes = new byte[32];
+        sr.nextBytes(verifierBytes);
+        String verifier = b64Url(verifierBytes);
+        String challenge = b64Url(MessageDigest.getInstance("SHA-256")
+                .digest(verifier.getBytes(StandardCharsets.US_ASCII)));
+        byte[] stateBytes = new byte[16];
+        sr.nextBytes(stateBytes);
+        String state = b64Url(stateBytes);
+        java.util.Map<String, String> ua = new java.util.LinkedHashMap<>();
+        ua.put("User-Agent", FXA_BROWSER_UA);
+        JSONObject payload = new JSONObject()
+                .put("response_type", "code")
+                .put("client_id", FXA_ANDROID_CLIENT_ID)
+                .put("redirect_uri", FXA_ANDROID_REDIRECT_URI)
+                .put("scope", VPN_SCOPES)
+                .put("state", state)
+                .put("access_type", "offline")
+                .put("code_challenge", challenge)
+                .put("code_challenge_method", "S256");
+        String code = null;
+        Exception lastErr = null;
+        for (String base : new String[]{FXA_API, FXA_OAUTH_API}) {
+            JSONObject data;
+            try {
+                data = fxaPostBase(base, "/oauth/authorization", payload, sessionToken, ua);
+            } catch (Exception e) {
+                lastErr = e;
+                continue; // transport failure: the sibling may still answer
+            }
+            if (data.has("code")) {
+                if (!state.equals(data.optString("state", "")))
+                    throw new Exception("oauth authorization state mismatch");
+                code = data.getString("code");
+                break;
+            }
+            if (data.optInt("_status", 0) == 406) {
+                // Edge hard block (empty body -> no errno/message):
+                // not an FxA verdict — try the sibling host.
+                lastErr = new Exception("oauth authorization hard-blocked (HTTP 406) on " + base);
+                continue;
+            }
+            // A real FxA answer is final (e.g. errno 110: session over).
+            if (data.optInt("errno", -1) == 110)
+                throw new Exception("Firefox sign-in has ended (errno 110): sign in again");
+            throw new Exception("FxA refused the authorization code: "
+                    + data.optString("message", "HTTP " + data.optInt("_status", 0))
+                    + " (errno " + data.optInt("errno", -1) + ")");
+        }
+        if (code == null)
+            throw lastErr != null ? lastErr
+                    : new Exception("oauth authorization returned no code");
+        String form = formEncode(new String[][]{
+                {"client_id", FXA_ANDROID_CLIENT_ID},
+                {"grant_type", "authorization_code"},
+                {"code", code},
+                {"code_verifier", verifier},
+                {"redirect_uri", FXA_ANDROID_REDIRECT_URI}});
+        java.util.Map<String, String> formHeaders = new java.util.LinkedHashMap<>();
+        formHeaders.put("Content-Type", "application/x-www-form-urlencoded");
+        formHeaders.put("User-Agent", FXA_BROWSER_UA);
+        lastErr = null;
+        for (String base : new String[]{FXA_API, FXA_OAUTH_API}) {
+            FpnNet.Resp r;
+            try {
+                r = httpTransport("POST", new URL(base + "/token"), null,
+                        form.getBytes(StandardCharsets.UTF_8), formHeaders);
+            } catch (Exception e) {
+                lastErr = e;
+                continue;
+            }
+            JSONObject data = new JSONObject(
+                    r.body == null || r.body.isEmpty() ? "{}" : r.body);
+            if (data.has("access_token")) {
+                tokenCache = data.getString("access_token");
+                tokenExpiresMs = System.currentTimeMillis()
+                        + data.optLong("expires_in", 86400) * 1000;
+                return tokenCache;
+            }
+            if (r.status == 406) {
+                lastErr = new Exception("token redeem hard-blocked (HTTP 406) on " + base);
+                continue;
+            }
+            // A real OAuth error (dead/invalid code, …) is final.
+            throw new Exception("FxA refused the token redeem: "
+                    + data.optString("message", "HTTP " + r.status)
+                    + " (errno " + data.optInt("errno", -1) + ")");
+        }
+        throw lastErr != null ? lastErr
+                : new Exception("token redeem failed on both FxA hosts");
+    }
+
     // ── Guardian (proxy pass) ───────────────────────────────────────────────
+    // Pass resilience (DIAG-2026-11-16): the pass TTL is only ~600 s,
+    // and the fetch runs BEFORE the tunnel — Guardian (vpn.mozilla.org)
+    // and FxA both sit in Fastly's 151.101.0.0/16, which an ISP can
+    // blackhole while the MASQUE gateways (23.235.42.0/24) stay
+    // reachable. A connect must therefore not hinge on a live fetch:
+    //   1. the pass is cached ON DISK (per account), so it survives
+    //      process death and engine restarts;
+    //   2. a background prefetcher (startPassPrefetcher) keeps that
+    //      cache fresh whenever the app process is alive;
+    //   3. at use time, a failed fetch falls back to the cached pass
+    //      while it is valid or within PASS_GRACE_SEC past expiry —
+    //      the gateway is the real judge of a pass (a rejected one
+    //      answers 407 and force-refreshes, as before). A definitive
+    //      Mozilla answer (Guardian 4xx, dead sign-in) is never
+    //      masked by a stale pass.
+    /** Refresh the cached pass once it has less than this left. */
+    private static final long PASS_REFRESH_MARGIN_SEC = 120;
+    /** The prefetcher refreshes earlier, so the disk cache is young. */
+    private static final long PASS_PREFETCH_MARGIN_SEC = 240;
+    /** How far past expiry a cached pass may still be presented when
+     *  the fetch is unreachable. TTL is ~600 s; filtering episodes on
+     *  Iranian ISPs escalate over minutes and the prefetcher normally
+     *  keeps the cache within ~4 min of fresh, so 15 min covers a
+     *  dead-process gap during an episode without routinely presenting
+     *  long-dead passes (which would only earn 407s). */
+    private static final long PASS_GRACE_SEC = 900;
+
     private synchronized String currentPass() throws Exception {
-        if (passCache != null && System.currentTimeMillis() / 1000 < passExpiresSec - 120) return passCache;
+        if (passCache == null) loadPassCacheDisk();
+        long now = System.currentTimeMillis() / 1000;
+        if (passCache != null && now < passExpiresSec - PASS_REFRESH_MARGIN_SEC) {
+            passSource = "cached";
+            return passCache;
+        }
+        return fetchPassWithGrace();
+    }
+
+    /** One live pass fetch against Guardian (mints via FxA first). On
+     *  success the result is cached in memory AND on disk. */
+    private String fetchPass() throws Exception {
         String accessToken = getAccessToken();
         FpnNet.Resp r = httpTransport("GET",
                 new URL("https://" + GUARDIAN_HOST + "/api/v1/fpn/token"),
@@ -356,8 +584,205 @@ public class FpnEngine {
                 Base64.decode(parts[1], Base64.URL_SAFE | Base64.NO_WRAP | Base64.NO_PADDING), StandardCharsets.UTF_8));
         passCache = token;
         passExpiresSec = body.getLong("exp");
+        persistPassCache();
         log("pass refreshed; expires in " + (passExpiresSec - System.currentTimeMillis() / 1000) + " s");
         return passCache;
+    }
+
+    /** Fetch, with the cached-grace fallback described above. Callers
+     *  hold this engine's monitor (currentPass is synchronized;
+     *  synchronized is reentrant). */
+    private String fetchPassWithGrace() throws Exception {
+        try {
+            String t = fetchPass();
+            passSource = "fresh";
+            lastPassError = null;
+            lastPassFetchFailed = false;
+            return t;
+        } catch (Exception e) {
+            lastPassError = e;
+            lastPassFetchFailed = true;
+            long now = System.currentTimeMillis() / 1000;
+            if (passCache != null && !passFailureIsFinal(e)
+                    && now < passExpiresSec + PASS_GRACE_SEC) {
+                long overdue = now - passExpiresSec;
+                if (overdue > 0) {
+                    passSource = "cached-grace";
+                    log("pass: fetch failed (" + e.getMessage()
+                            + "); using cached-grace pass, expired " + overdue
+                            + " s ago (grace " + PASS_GRACE_SEC + " s)");
+                } else {
+                    passSource = "cached";
+                    log("pass: fetch failed (" + e.getMessage()
+                            + "); using cached pass, still valid for " + (-overdue) + " s");
+                }
+                return passCache;
+            }
+            log("pass: fetch failed (" + e.getMessage() + "); no usable cached pass");
+            throw e;
+        }
+    }
+
+    /** The fetch produced a definitive Mozilla answer that a stale
+     *  pass must not mask: a Guardian 4xx, or a dead/refused sign-in. */
+    private static boolean passFailureIsFinal(Exception e) {
+        String m = String.valueOf(e.getMessage());
+        return m.contains("proxy pass: HTTP 4")
+                || m.contains("no session token") || m.contains("errno 110")
+                || m.contains("errno 138") || m.contains("sign-in has ended")
+                || m.contains("FxA refused");
+    }
+
+    /** No HTTP answer at all (timeout / reset / unreachable): the
+     *  pass hosts never got to speak. The Doctor's E8 half-test. */
+    private static boolean passFailureIsTransport(Exception e) {
+        String m = String.valueOf(e.getMessage());
+        return !m.contains("proxy pass: HTTP") && !passFailureIsFinal(e)
+                && !m.contains("hard-blocked");
+    }
+
+    /** Doctor support: the most recent pass fetch died in transport. */
+    public boolean passFetchWasTransportFailure() {
+        return lastPassError != null && passFailureIsTransport(lastPassError);
+    }
+
+    /** Doctor support (DIAG-2026-11-16): is the current MASQUE
+     *  gateway itself answering TCP? Pass hosts and gateways live in
+     *  different Fastly ranges, so one can be filtered while the
+     *  other is fine — the E8 signature is exactly that split. */
+    public boolean gatewayTcpReachable() {
+        Upstream up = upstream;
+        if (up == null) return false;
+        return probeRtt(up) >= 0;
+    }
+
+    // ── pass disk cache (per account, keyed by the session uid) ─────
+    // Static lock: the service engine and the background prefetch
+    // engine are different instances in one process writing one file.
+    private static final Object passDiskLock = new Object();
+
+    private File passCacheFile() {
+        File dir = filesDir();
+        return dir != null ? new File(dir, "fpn_pass.json") : null;
+    }
+
+    private String sessionUid() {
+        try {
+            JSONObject doc = new JSONObject(readFile(sessionFile));
+            JSONObject ad = doc.optJSONObject("accountData");
+            return ad != null ? ad.optString("uid", "") : "";
+        } catch (Exception e) {
+            return "";
+        }
+    }
+
+    private void loadPassCacheDisk() {
+        File f = passCacheFile();
+        if (f == null) return;
+        synchronized (passDiskLock) {
+            try {
+                if (!f.exists()) return;
+                JSONObject doc = new JSONObject(readFile(f));
+                String uid = doc.optString("uid", "");
+                // A pass belongs to the account that minted it; never
+                // present another account's pass after a switch.
+                if (!uid.equals(sessionUid())) return;
+                String token = doc.optString("token", null);
+                long exp = doc.optLong("exp", 0);
+                if (token == null || exp == 0) return;
+                passCache = token;
+                passExpiresSec = exp;
+                log("pass: loaded disk cache; expires in "
+                        + (exp - System.currentTimeMillis() / 1000) + " s");
+            } catch (Exception ignored) { }
+        }
+    }
+
+    private void persistPassCache() {
+        File f = passCacheFile();
+        if (f == null || passCache == null) return;
+        synchronized (passDiskLock) {
+            try {
+                JSONObject doc = new JSONObject()
+                        .put("token", passCache)
+                        .put("exp", passExpiresSec)
+                        .put("uid", sessionUid())
+                        .put("savedAtMs", System.currentTimeMillis());
+                File tmp = new File(f.getParentFile(), "fpn_pass.json.tmp");
+                java.io.FileWriter w = new java.io.FileWriter(tmp);
+                w.write(doc.toString());
+                w.close();
+                if (!tmp.renameTo(f)) {
+                    try { f.delete(); } catch (Exception ignored) { }
+                    tmp.renameTo(f);
+                }
+            } catch (Exception ignored) { }
+        }
+    }
+
+    private void clearPassCacheDisk() {
+        File f = passCacheFile();
+        if (f == null) return;
+        synchronized (passDiskLock) {
+            try { f.delete(); } catch (Exception ignored) { }
+        }
+    }
+
+    // ── Background pass prefetch ────────────────────────────────────
+    // One daemon thread per process, started from FpnApp.onCreate.
+    // Every 45 s it tops the disk cache up (refreshing once the pass
+    // is inside the prefetch margin) so a connect — above all a
+    // connect on a filtered network — starts with a young pass
+    // instead of minting one on the spot. Failures back off 5 min:
+    // no retry storms against the FxA/Guardian hosts (W8 posture).
+    private static final java.util.concurrent.atomic.AtomicBoolean PASS_PREFETCH_ON =
+            new java.util.concurrent.atomic.AtomicBoolean(false);
+    private static volatile FpnEngine passPrefetchEngine;
+    private static volatile long passPrefetchBackoffUntilMs;
+
+    public static void startPassPrefetcher(final android.content.Context ctx) {
+        if (!PASS_PREFETCH_ON.compareAndSet(false, true)) return;
+        Thread t = new Thread(() -> {
+            try { Thread.sleep(20_000); } catch (InterruptedException e) { return; }
+            while (true) {
+                try { Thread.sleep(45_000); } catch (InterruptedException e) { return; }
+                try { prefetchPassOnce(ctx); } catch (Throwable ignored) { }
+            }
+        }, "fpn-pass-prefetch");
+        t.setDaemon(true);
+        t.start();
+    }
+
+    private static void prefetchPassOnce(android.content.Context ctx) {
+        if (System.currentTimeMillis() < passPrefetchBackoffUntilMs) return;
+        if (!FpnSession.exists(ctx)) return; // signed out, or the store is sealed
+        File sf = FpnSession.file(ctx);
+        FpnEngine e = passPrefetchEngine;
+        if (e == null || !sf.equals(e.sessionFile)) {
+            File log = new File(ctx.getFilesDir(), "engine_log.txt");
+            e = new FpnEngine(sf, new File(ctx.getFilesDir(), "country.txt"), log,
+                    buildUpstreamFactory(ctx, log));
+            passPrefetchEngine = e;
+        }
+        e.prefetchPass();
+    }
+
+    /** Best-effort refresh for the prefetcher; never throws. */
+    private synchronized void prefetchPass() {
+        if (passCache == null) loadPassCacheDisk();
+        long now = System.currentTimeMillis() / 1000;
+        if (passCache != null && now < passExpiresSec - PASS_PREFETCH_MARGIN_SEC) return;
+        try {
+            fetchPassWithGrace();
+        } catch (Exception ignored) {
+            // fetchPassWithGrace already logged the failure path.
+        }
+        if (lastPassFetchFailed) {
+            passPrefetchBackoffUntilMs = System.currentTimeMillis() + 300_000;
+            log("pass: background prefetch could not reach Mozilla; backing off 5 min");
+        } else {
+            log("pass: background prefetch ok (" + passSource + ")");
+        }
     }
 
     // ── Server list ─────────────────────────────────────────────────────────
@@ -1249,7 +1674,10 @@ public class FpnEngine {
     public String passCheck() throws Exception {
         String p = currentPass();
         long left = passExpiresSec - System.currentTimeMillis() / 1000;
-        return "pass ok, expires in " + left + " s";
+        if ("cached-grace".equals(passSource))
+            return "pass fetch FAILED — using cached pass expired " + (-left)
+                    + " s ago (grace " + PASS_GRACE_SEC + " s)";
+        return "pass ok (" + passSource + "), expires in " + left + " s";
     }
 
     /** Classify a pass-fetch failure into a Doctor code (E2/E5/E3/E4). */
@@ -1428,6 +1856,7 @@ public class FpnEngine {
                             .put("rttMs", upstream != null ? upstream.rttMs : -1)
                             .put("passExpiresInSec", passCache != null
                                     ? Math.max(0, passExpiresSec - System.currentTimeMillis() / 1000) : JSONObject.NULL)
+                            .put("passState", passSource)
                             .put("bytesUp", sessionUp.get())
                             .put("bytesDown", sessionDown.get());
                 } else if (u.getPath().equals("/country")) {

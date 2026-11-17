@@ -110,6 +110,7 @@
     <string name="reason_e5">موزیلا توکن ورود را رد کرد. دوباره وارد شوید.</string>
     <string name="reason_e6">اجازهٔ VPN داده نشده است. «اتصال» را بزنید و اجازهٔ VPN را تأیید کنید.</string>
     <string name="reason_e7">خطای پیش‌بینی‌نشده‌ای رخ داد. لطفاً گزارش تشخیصی بفرستید تا بررسی کنیم.</string>
+    <string name="reason_e8">میزبان ورود موزیلا روی این شبکه مسدود است — خود سرورهای خروجی در دسترس‌اند. دادهٔ همراه یا وای‌فای دیگری را امتحان کنید.</string>
     <string name="chk_signin_present">ورود: موجود است</string>
     <string name="chk_signin_missing">ورود: وجود ندارد</string>
     <string name="chk_network_up">اینترنت گوشی: برقرار</string>
@@ -119,6 +120,7 @@
     <string name="chk_engine_start_failed">روشن شدن موتور ناموفق بود — %1$s</string>
     <string name="chk_pass_ok">گذرنامهٔ موزیلا: سالم (%1$s)</string>
     <string name="chk_pass_failed">گذرنامهٔ موزیلا: ناموفق — %1$s</string>
+    <string name="chk_pass_blocked">گذرنامهٔ موزیلا: میزبان ورود در دسترس نیست، اما سرور خروجی پاسخ می‌دهد — این شبکه میزبان‌های موزیلا را فیلتر می‌کند</string>
     <string name="chk_dns">DNS: %1$s</string>
     <string name="chk_exit_ok">سلامت خروجی: خوب — %1$s</string>
     <string name="chk_exit_failed">سلامت خروجی: ناموفق (%1$s) — %2$s</string>

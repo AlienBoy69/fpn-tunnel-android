@@ -28,6 +28,9 @@ import java.util.concurrent.atomic.AtomicBoolean;
  *   E5 sign-in token rejected
  *   E6 VPN permission not granted
  *   E7 unknown — send diagnostics
+ *   E8 Mozilla's sign-in/pass hosts blocked on this network, while
+ *      the exit servers themselves are reachable (DIAG-2026-11-16:
+ *      ISP filtering of Fastly's 151.101.0.0/16) — try another network
  *
  * Every step is also logged to fpn_log.txt with a "doctor:" prefix.
  * Repairs: refresh pass -> re-pick server -> AUTO fallback -> Smart
@@ -85,6 +88,7 @@ public final class ConnectionDoctor {
             case "E4": return c.getString(R.string.reason_e4);
             case "E5": return c.getString(R.string.reason_e5);
             case "E6": return c.getString(R.string.reason_e6);
+            case "E8": return c.getString(R.string.reason_e8);
             default:   return c.getString(R.string.reason_e7);
         }
     }
@@ -175,7 +179,17 @@ public final class ConnectionDoctor {
             } catch (Exception e) {
                 checks.add(S(R.string.chk_engine_start_failed, e.getMessage()));
                 dlog("check: engine start failed: " + e.getMessage());
-                finish(classifyStartError(e), false);
+                // DIAG-2026-11-16: the engine's warm-up pass fetch is
+                // usually what dies here; if it died in transport
+                // while a gateway answers, name the real cause (E8)
+                // instead of a generic "server unreachable".
+                if (passHostBlocked(eng)) {
+                    checks.add(S(R.string.chk_pass_blocked));
+                    dlog("check: E8 signature — pass hosts unreachable, gateway answers");
+                    finish("E8", false);
+                } else {
+                    finish(classifyStartError(e), false);
+                }
                 return;
             }
         } else {
@@ -303,7 +317,28 @@ public final class ConnectionDoctor {
             return;
         }
         repairs.add(S(R.string.rep_service_no));
+        // DIAG-2026-11-16: if every repair failed because the pass
+        // hosts never answered while a gateway does, the verdict is
+        // E8 (this network filters Mozilla's hosts) — none of the
+        // repairs can fix that, and E3's "exit server unreachable"
+        // would name the wrong half of the path.
+        FpnEngine lastEng = svc.engineRef() != null ? svc.engineRef() : eng;
+        if (passHostBlocked(lastEng)) {
+            checks.add(S(R.string.chk_pass_blocked));
+            dlog("check: E8 signature — pass hosts unreachable, gateway answers");
+            finish("E8", false);
+            return;
+        }
         finish(failCode, false);
+    }
+
+    /** DIAG-2026-11-16 signature: the pass/sign-in fetch died in
+     *  transport (no HTTP answer) while a MASQUE gateway answers TCP.
+     *  The two live in different Fastly ranges (151.101.0.0/16 vs
+     *  23.235.42.0/24), so an ISP can filter one and not the other. */
+    private boolean passHostBlocked(FpnEngine eng) {
+        return eng != null && eng.passFetchWasTransportFailure()
+                && eng.gatewayTcpReachable();
     }
 
     private boolean healthOk(FpnEngine eng) {
